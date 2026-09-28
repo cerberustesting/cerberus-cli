@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Cerberus TestCase Schema",
+  "type": "object",
+  "properties": {
+    "testFolderId": { "type": "string", "readOnly": true },
+    "testcaseId": { "type": "string", "readOnly": true },
+    "application": { "type": "string", "readOnly": true },
+    "description": { "type": "string", "description": "Courte description du test" },
+    "priority": {
+      "type": "integer",
+      "enum": [1, 2, 3, 4, 5],
+      "description": "1=Bloquant, 5=Mineur"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["WORKING", "READY", "OBSOLETE"],
+      "description": "État fonctionnel du test"
+    }
+  },
+  "required": ["testFolderId", "testcaseId", "application", "description"]
+}

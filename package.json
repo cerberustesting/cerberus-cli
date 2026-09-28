@@ -1,0 +1,43 @@
+{
+  "name": "cerberus-testing-cli",
+  "version": "0.2.0",
+  "type": "module",
+  "bin": {
+    "cerberus-testing": "dist/index.js",
+    "cerberus": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x dist/index.js",
+    "start": "node --loader ts-node/esm src/index.ts",
+    "pull": "npm run build && node ./dist/index.js pull",
+    "push": "npm run build && node ./dist/index.js push",
+    "prepublishOnly": "rm -rf dist && npm run build"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "node-fetch": "^3.3.2",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.1",
+    "@types/node": "^22.0.0"
+  },
+  "description": "CLI Cerberus : synchronise les tests Cerberus (YAML) avec le d\u00e9p\u00f4t du d\u00e9veloppeur",
+  "files": [
+    "dist",
+    "schema",
+    "cerberus.config.example.json",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "cerberus",
+    "testing",
+    "cli",
+    "yaml"
+  ],
+  "license": "MIT"
+}
