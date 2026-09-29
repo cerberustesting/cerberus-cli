@@ -1,9 +1,9 @@
-import { loadConfig } from "../config.js";
+import { loadConfig, testsDir } from "../config.js";
 import { findLocalTestDirs, readLocalTest } from "../dsl/local-format.js";
 
 export async function validateCommand(): Promise<void> {
   const config = loadConfig();
-  const testDirs = findLocalTestDirs(config.defaultBaseDir);
+  const testDirs = findLocalTestDirs(testsDir(config));
 
   if (testDirs.length === 0) {
     throw new Error("Aucun testcase local à valider.");
