@@ -32,10 +32,10 @@ Le repository local Cerberus vit dans :
 - \`${dir}/.cerberus/\` : fichiers techniques du CLI (schémas/types).
 
 Pour un testcase :
-- \`${dir}/tests/<testFolderId>/<testcaseId - description>/test.spec.ts\` : scénario Playwright-like éditable.
-- \`${dir}/tests/<testFolderId>/<testcaseId - description>/cerberus.yaml\` : métadonnées Cerberus.
-- \`${dir}/tests/<testFolderId>/<testcaseId - description>/.cerberus/state.json\` : état technique de round-trip, ne pas éditer manuellement.
-- \`${dir}/tests/<testFolderId>/<testcaseId - description>/.cerberus/conflict-vN.json\` : version serveur en conflit.
+- \`${dir}/tests/<testFolderId>/<testcaseId - description>/script.ts\` : scénario Playwright-like éditable.
+- \`${dir}/tests/<testFolderId>/<testcaseId - description>/header.yaml\` : métadonnées Cerberus.
+- \`${dir}/tests/<testFolderId>/<testcaseId - description>/.sync/baseline.json\` : baseline serveur utilisée pour le round-trip, ne pas éditer manuellement.
+- \`${dir}/tests/<testFolderId>/<testcaseId - description>/.sync/conflict-vN.json\` : version serveur en conflit.
 - \`${dir}/.cerberus/cerberus-dsl.d.ts\` et \`${dir}/tsconfig.json\` : types du DSL pour l'IDE.
 
 Commandes :
@@ -46,12 +46,12 @@ Commandes :
 - \`cerberus validate\` : valide le DSL avant push. Un Playwright pur peut servir de brouillon, mais \`validate\` bloque tant
   qu'il reste des actions hors \`cerberus.step(...)\`.
 - \`cerberus push [dossier/id ...]\` : sans référence, pousse les tests et ressources modifiés du workspace ; avec une référence testcase, ne pousse que ce testcase. Garde-fous : Si le testcase n'existe pas encore, il le crée via l'API publique puis relit et vérifie le résultat. S'il existe, il refuse si le serveur a changé depuis
-  le dernier pull (utiliser \`merge\`), sauvegarde l'état serveur dans \`.cerberus/backups/\` avant l'envoi, puis relit le testcase et
+  le dernier pull (utiliser \`merge\`), sauvegarde l'état serveur dans \`.sync/backups/\` avant l'envoi, puis relit le testcase et
   échoue si pays, propriétés ou étapes diffèrent. Options : \`--dry-run\`, \`--all\`, \`--force\` (écrase le serveur, à éviter).
 - \`cerberus merge [dossier/id ...]\` : fusion à trois voies (dernier pull, local, serveur). Les conflits ne sont jamais tranchés
   en silence : sans option, rien n'est écrit ; \`--ours\` garde le local, \`--theirs\` garde le serveur, \`--dry-run\` prévisualise.
   Ce qui a disparu du serveur est conservé localement (\`--apply-deletions\` pour le supprimer aussi). Ne jamais supprimer les
-  sauvegardes de \`.cerberus/backups/\` sans l'accord de l'utilisateur.
+  sauvegardes de \`.sync/backups/\` sans l'accord de l'utilisateur.
 - \`cerberus run <dossier>/<testcaseId> [...]\` : lance des tests sur Cerberus et attend le résultat.
   Options : \`-f/--folder <dossier>\` (tous les tests locaux du dossier), \`-c/--country FR\`, \`-e/--env QA\`,
   \`-r/--robot <nom>\` (options répétables), \`--tag\`, \`--timeout <s>\`, \`--junit report.xml\`, \`--json\`, \`--no-wait\`.
