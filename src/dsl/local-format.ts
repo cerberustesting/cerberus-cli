@@ -611,6 +611,69 @@ export function parseSpec(
   };
 
   visit(source);
+
+  const findActionsOutsideSteps = (node: ts.Node, insideStep: boolean): void => {
+    if (ts.isCallExpression(node)) {
+      if (
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        node.expression.expression.text === "cerberus" &&
+        node.expression.name.text === "step"
+      ) {
+        for (const arg of node.arguments) {
+          if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
+            ts.forEachChild(arg, (child) => findActionsOutsideSteps(child, true));
+          }
+        }
+        return;
+      }
+
+      let isDslAction = false;
+
+      if (ts.isPropertyAccessExpression(node.expression)) {
+        const receiver = node.expression.expression;
+
+        if (ts.isIdentifier(receiver) && ["page", "request"].includes(receiver.text)) {
+          isDslAction = true;
+        } else if (
+          ts.isIdentifier(receiver) &&
+          receiver.text === "cerberus" &&
+          ["do", "action", "control", "calculateProperty"].includes(node.expression.name.text)
+        ) {
+          isDslAction = true;
+        } else if (
+          ts.isCallExpression(receiver) &&
+          ts.isPropertyAccessExpression(receiver.expression) &&
+          ts.isIdentifier(receiver.expression.expression) &&
+          receiver.expression.expression.text === "page"
+        ) {
+          isDslAction = true;
+        }
+      }
+
+      if (isDslAction && !insideStep) {
+        issues.push({
+          file: specPath,
+          line: sourceLine(source, node),
+          message:
+            "Action outside cerberus.step(...). Run 'cerberus prepare' and group Playwright actions into functional Cerberus steps before push.",
+        });
+      }
+    }
+
+    ts.forEachChild(node, (child) => findActionsOutsideSteps(child, insideStep));
+  };
+
+  findActionsOutsideSteps(source, false);
+
+  if (steps.length === 0) {
+    issues.push({
+      file: specPath,
+      message:
+        "No cerberus.step(...) found. Pure Playwright is accepted as a draft, but must be enriched before validate/push.",
+    });
+  }
+
   return { steps, issues };
 }
 
