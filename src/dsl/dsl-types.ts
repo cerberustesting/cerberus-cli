@@ -97,6 +97,21 @@ interface CerberusDataLibRef {
     value(subData: string): string;
 }
 
+interface CerberusPropertyDefinition {
+    type: string;
+    value1?: string;
+    value2?: string;
+    value3?: string;
+    length?: string;
+    rowLimit?: number;
+    nature?: string;
+    rank?: number | string;
+}
+
+interface CerberusPropertySource {
+    readonly __cerberusPropertySource: true;
+}
+
 interface Cerberus {
     step(description: string, body: () => Promise<void>): Promise<void>;
     /** Référence un ApplicationObject Cerberus par son nom. */
@@ -105,6 +120,14 @@ interface Cerberus {
     service(name: string): CerberusServiceRef;
     /** Référence une DataLib Cerberus dans une valeur. */
     datalib(name: string): CerberusDataLibRef;
+    /** Déclare les propriétés du testcase au début du test. */
+    properties(definitions: Record<string, string | number | CerberusPropertyDefinition | CerberusPropertySource>): void;
+    /** Référence %property.NAME% dans une valeur. */
+    property(name: string): string;
+    /** Raccourci de déclaration d'une propriété getFromDataLib. */
+    fromDataLib(name: string): CerberusPropertySource;
+    /** Raccourci de déclaration d'une propriété getFromJS. */
+    fromJS(expression?: string): CerberusPropertySource;
     /** Référence un step de librairie Cerberus sans dupliquer ses actions. */
     libraryStep(ref: CerberusLibraryStepRef): Promise<void>;
     /** Enrichit une action Playwright-like avec les métadonnées d'exécution Cerberus. */
