@@ -52,7 +52,13 @@ function isCerberusAction(call: ts.CallExpression): boolean {
 function isPageCall(call: ts.CallExpression): boolean {
   if (!ts.isPropertyAccessExpression(call.expression)) return false;
   const receiver = call.expression.expression;
-  if (ts.isIdentifier(receiver) && receiver.text === "page") return true;
+  if (ts.isIdentifier(receiver) && receiver.text === "page") {
+    const method = call.expression.name.text;
+    if (["locator", "getByRole", "getByText", "getByLabel", "getByPlaceholder", "getByTestId", "getByAltText", "getByTitle"].includes(method)) {
+      return false;
+    }
+    return true;
+  }
 
   if (
     ts.isCallExpression(receiver) &&
