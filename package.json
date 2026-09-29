@@ -11,19 +11,20 @@
     "start": "node --loader ts-node/esm src/index.ts",
     "pull": "npm run build && node ./dist/index.js pull",
     "push": "npm run build && node ./dist/index.js push",
-    "prepublishOnly": "rm -rf dist && npm run build"
+    "prepublishOnly": "rm -rf dist && npm run build",
+    "validate": "npm run build && node ./dist/index.js validate"
   },
   "dependencies": {
     "commander": "^12.1.0",
     "node-fetch": "^3.3.2",
-    "yaml": "^2.6.0"
+    "yaml": "^2.6.0",
+    "typescript": "^5.3.3"
   },
   "devDependencies": {
-    "typescript": "^5.3.3",
     "ts-node": "^10.9.1",
     "@types/node": "^22.0.0"
   },
-  "description": "CLI Cerberus : synchronise les tests Cerberus (YAML) avec le d\u00e9p\u00f4t du d\u00e9veloppeur",
+  "description": "CLI Cerberus : synchronise les tests Cerberus (YAML) avec le dépôt du développeur",
   "files": [
     "dist",
     "schema",
