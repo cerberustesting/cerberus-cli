@@ -31,7 +31,11 @@ Les tests fonctionnels vivent dans :
 
 Commandes :
 - \`cerberus pull\` : télécharge et convertit les tests vers le format local.
-- \`cerberus validate\` : valide le DSL avant push.
+- \`cerberus prepare [dossier/id ...]\` : analyse un test Playwright avant Cerberusification. Il signale les actions hors
+  \`cerberus.step(...)\`, le nombre d'actions enrichies avec \`cerberus.do(...)\` et les descriptions. \`--json\`
+  fournit un diagnostic exploitable par une IA. Cette commande ne modifie jamais le test.
+- \`cerberus validate\` : valide le DSL avant push. Un Playwright pur peut servir de brouillon, mais \`validate\` bloque tant
+  qu'il reste des actions hors \`cerberus.step(...)\`.
 - \`cerberus push [dossier/id ...]\` : envoie les tests modifiés localement, avec garde-fous. Il refuse si le serveur a changé depuis
   le dernier pull (utiliser \`merge\`), sauvegarde l'état serveur dans \`.cerberus/backups/\` avant l'envoi, puis relit le testcase et
   échoue si pays, propriétés ou étapes diffèrent. Options : \`--dry-run\`, \`--all\`, \`--force\` (écrase le serveur, à éviter).
@@ -47,11 +51,30 @@ Commandes :
   Le serveur exécute la version poussée : faire \`validate\` puis \`push\` avant \`run\` après une modification.
 - Authentification, jamais dans le dépôt : \`cerberus login\` (OAuth via le navigateur si le serveur l'active, sinon clé API ; \`--api-key\` ou \`--oauth\` pour forcer), \`cerberus whoami\`, \`cerberus logout\`. En CI : variable \`CERBERUS_API_KEY\`.
 
-Le DSL est volontairement contraint. Les actions courantes utilisent une syntaxe Playwright-like
-(\`page.goto\`, \`page.evaluate\`, \`page.waitForTimeout\`) et les primitives Cerberus
-utilisent \`cerberus.*\`. Les actions non mappées sont conservées avec \`cerberus.action(...)\`.
+Le DSL est volontairement contraint :
+- \`page.*\` et \`page.locator(...).*\` utilisent le vocabulaire Playwright Web réel ;
+- \`request.*\` est réservé au vocabulaire Playwright API réel ; un appel HTTP n'est accepté au push que s'il existe un mapping
+  Cerberus réellement équivalent ;
+- \`cerberus.do(playwrightAction, metadata)\` ajoute description, condition, screenshot, fatalité ou waits sans remplacer l'action Playwright ;
+- \`cerberus.*\` porte les capacités propres à Cerberus ; une action sans mapping Playwright reste \`cerberus.action(...)\`.
 Les URL, durées, noms de propriété/action/contrôle doivent être des littéraux : \`cerberus validate\` refuse le reste.
 Un \`cerberus.control(...)\` doit suivre l'action qu'il vérifie.
+
+### Workflow IA : « convertis en Cerberus et push »
+
+Quand l'utilisateur demande « convertis en Cerberus », « Cerberusify », « convertis en Cerberus et push » ou une formulation équivalente :
+1. lancer \`cerberus prepare <dossier/id> --json\` pour analyser le Playwright existant ;
+2. conserver autant que possible le code Playwright natif ;
+3. regrouper les actions en \`cerberus.step(...)\` selon leur intention fonctionnelle, et non mécaniquement une action par step ;
+4. ajouter \`cerberus.do(action, { description: "..." })\` seulement quand la description ou une metadata Cerberus apporte
+   une valeur utile au reporting ou à l'exécution ; ne pas wrapper systématiquement toutes les actions ;
+5. utiliser \`cerberus.*\` uniquement pour une capacité propre à Cerberus ou lorsqu'aucun mapping Playwright équivalent n'existe ;
+6. ne jamais inventer une méthode sous \`page.*\` ou \`request.*\` ;
+7. lancer \`cerberus validate\` et corriger toutes les erreurs ;
+8. lancer \`cerberus push <dossier/id> --dry-run\`, examiner les changements, puis \`cerberus push <dossier/id>\` si le résultat est cohérent.
+
+Le rôle de l'IA est d'ajouter la structure et les métadonnées Cerberus autour du Playwright existant, pas de réécrire inutilement
+le scénario ni d'en changer l'intention fonctionnelle.
 ${BLOCK_END}
 `;
 }
