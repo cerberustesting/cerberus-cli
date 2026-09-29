@@ -94,7 +94,7 @@ program
     .description("Prépare le projet courant : config, schéma IDE, instructions pour assistants IA")
     .option("--api-url <url>", "URL de l'API publique Cerberus", "https://qa.cerberus-testing.com/api/public")
     .option("--application <name>", "application Cerberus à synchroniser")
-    .option("--dir <path>", "dossier des tests", "tests")
+    .option("--dir <path>", "dossier local Cerberus", "cerberus")
     .option("--force", "écrase cerberus.config.json existant")
     .action((opts) => initCommand(opts));
 
