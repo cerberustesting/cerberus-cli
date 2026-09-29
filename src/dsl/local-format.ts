@@ -223,6 +223,19 @@ export function generateSpec(test: TestCaseDetailed): string {
 
   for (const step of test.steps ?? []) {
     lines.push("");
+
+    if (step.isUsingLibraryStep) {
+      lines.push(
+        `    await cerberus.libraryStep(${JSON.stringify({
+          testFolder: step.libraryStepTestFolderId ?? "",
+          testcase: step.libraryStepTestcaseId ?? "",
+          step: step.libraryStepStepId,
+          ...(hasText(step.description) ? { description: step.description } : {}),
+        })});`
+      );
+      continue;
+    }
+
     lines.push(
       `    await cerberus.step(${literal(step.description || `Step ${step.stepId}`)}, async () => {`
     );
@@ -490,6 +503,68 @@ function parseActionCall(
   return undefined;
 }
 
+function baseStep(original: TestCaseDetailed, template: TestCaseStep | undefined, index: number): TestCaseStep {
+  return template
+    ? { ...template, actions: [...(template.actions ?? [])] }
+    : {
+        testFolderId: original.testFolderId,
+        testcaseId: original.testcaseId,
+        stepId: index + 1,
+        sort: index + 1,
+        loop: "onceIfConditionTrue",
+        conditionOperator: "always",
+        isUsingLibraryStep: false,
+        libraryStepStepId: 0,
+        isStepInUseByOtherTestcase: false,
+        libraryStepSort: 0,
+        isLibraryStep: false,
+        isExecutionForced: false,
+        actions: [],
+      };
+}
+
+function parseLibraryStepCall(
+  call: ts.CallExpression,
+  source: ts.SourceFile,
+  original: TestCaseDetailed,
+  template: TestCaseStep | undefined,
+  index: number,
+  issues: ValidationIssue[]
+): TestCaseStep | undefined {
+  const values = parseObjectExpression(call.arguments[0]);
+  const testFolder = values.testFolder;
+  const testcase = values.testcase;
+  const stepId = values.step;
+
+  if (typeof testFolder !== "string" || !testFolder) {
+    issues.push({ file: source.fileName, line: sourceLine(source, call), message: "cerberus.libraryStep() requires a literal testFolder." });
+    return undefined;
+  }
+  if (typeof testcase !== "string" || !testcase) {
+    issues.push({ file: source.fileName, line: sourceLine(source, call), message: "cerberus.libraryStep() requires a literal testcase." });
+    return undefined;
+  }
+  if (typeof stepId !== "number") {
+    issues.push({ file: source.fileName, line: sourceLine(source, call), message: "cerberus.libraryStep() requires a numeric literal step." });
+    return undefined;
+  }
+
+  const base = baseStep(original, template, index);
+  return {
+    ...base,
+    description:
+      typeof values.description === "string"
+        ? values.description
+        : base.description || `Library step ${testFolder}/${testcase}#${stepId}`,
+    sort: index + 1,
+    isUsingLibraryStep: true,
+    libraryStepTestFolderId: testFolder,
+    libraryStepTestcaseId: testcase,
+    libraryStepStepId: stepId,
+    actions: [],
+  };
+}
+
 export function parseSpec(
   specPath: string,
   original: TestCaseDetailed
@@ -500,6 +575,25 @@ export function parseSpec(
   const steps: TestCaseStep[] = [];
 
   const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === "cerberus" &&
+      node.expression.name.text === "libraryStep"
+    ) {
+      const libraryStep = parseLibraryStepCall(
+        node,
+        source,
+        original,
+        original.steps?.[steps.length],
+        steps.length,
+        issues
+      );
+      if (libraryStep) steps.push(libraryStep);
+      return;
+    }
+
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
@@ -595,23 +689,13 @@ export function parseSpec(
       }
 
       steps.push({
-        ...(originalStep ?? {
-          testFolderId: original.testFolderId,
-          testcaseId: original.testcaseId,
-          stepId: steps.length + 1,
-          sort: steps.length + 1,
-          loop: "onceIfConditionTrue",
-          conditionOperator: "always",
-          isUsingLibraryStep: false,
-          libraryStepStepId: 0,
-          isStepInUseByOtherTestcase: false,
-          libraryStepSort: 0,
-          isLibraryStep: false,
-          isExecutionForced: false,
-          actions: [],
-        }),
+        ...baseStep(original, originalStep, steps.length),
         description,
         sort: steps.length + 1,
+        isUsingLibraryStep: false,
+        libraryStepTestFolderId: undefined,
+        libraryStepTestcaseId: undefined,
+        libraryStepStepId: 0,
         actions,
       });
 
@@ -625,6 +709,15 @@ export function parseSpec(
 
   const findActionsOutsideSteps = (node: ts.Node, insideStep: boolean): void => {
     if (ts.isCallExpression(node)) {
+      if (
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        node.expression.expression.text === "cerberus" &&
+        node.expression.name.text === "libraryStep"
+      ) {
+        return;
+      }
+
       if (
         ts.isPropertyAccessExpression(node.expression) &&
         ts.isIdentifier(node.expression.expression) &&
@@ -685,7 +778,7 @@ export function parseSpec(
     issues.push({
       file: specPath,
       message:
-        "No cerberus.step(...) found. Pure Playwright is accepted as a draft, but must be enriched before validate/push.",
+        "No Cerberus step found. Pure Playwright is accepted as a draft, but must be enriched with cerberus.step(...) or cerberus.libraryStep(...) before validate/push.",
     });
   }
 
