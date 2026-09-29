@@ -13,7 +13,7 @@
     },
     "testcase": {
       "type": "string",
-      "description": "Cerberus testcase ID. If the server generates another ID during creation, the CLI adopts it locally."
+      "description": "Local provisional testcase identifier. Ignored on creation; Cerberus generates the server testcase ID."
     },
     "application": {
       "type": "string"
