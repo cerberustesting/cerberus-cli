@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { loadConfig } from "../config.js";
-import { findLocalTestDirs, readLocalTest, writeLocalTest } from "../dsl/local-format.js";
+import { findLocalTestDirs, localTestDirName, readLocalTest, writeLocalTest } from "../dsl/local-format.js";
 import {
   backupServerState,
   createServerTest,
@@ -145,9 +145,11 @@ export async function pushCommand(refs: string[], opts: PushOptions): Promise<nu
 
       let finalDir = testDir;
       const serverLabel = `${afterCreate.testFolderId}/${afterCreate.testcaseId}`;
-      if (serverLabel !== label) {
+      const targetFolderName = localTestDirName(afterCreate);
+      const currentFolderName = path.basename(testDir);
+      if (currentFolderName !== targetFolderName) {
         const baseDir = path.dirname(path.dirname(testDir));
-        const targetDir = path.join(baseDir, afterCreate.testFolderId, afterCreate.testcaseId);
+        const targetDir = path.join(baseDir, afterCreate.testFolderId, targetFolderName);
         if (fs.existsSync(targetDir)) {
           console.error(
             `❌ ${label} : le serveur a créé ${serverLabel}, mais le dossier local cible existe déjà : ${targetDir}`
@@ -158,7 +160,7 @@ export async function pushCommand(refs: string[], opts: PushOptions): Promise<nu
         fs.mkdirSync(path.dirname(targetDir), { recursive: true });
         fs.renameSync(testDir, targetDir);
         finalDir = targetDir;
-        console.log(`   ↪ dossier local renommé en ${serverLabel}`);
+        console.log(`   ↪ dossier local renommé en ${targetFolderName}`);
       }
 
       writeLocalTest(finalDir, afterCreate);
