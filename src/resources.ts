@@ -16,6 +16,7 @@ interface ResourceSpec {
   createPath(payload: Payload, config: CerberusConfig): string;
   updatePath(payload: Payload, config: CerberusConfig): string | undefined;
   identity(payload: Payload): string;
+  naturalIdentity?(payload: Payload): string;
   fileName(payload: Payload): string;
   editable(payload: Payload): Payload;
   validate(payload: Payload, file: string): string[];
@@ -96,6 +97,7 @@ const specs: ResourceSpec[] = [
     createPath: () => "/datalibs",
     updatePath: (p) => (p.id !== undefined && p.id !== null ? `/datalibs/${encodeURIComponent(p.id)}` : undefined),
     identity: (p) => p.id != null ? String(p.id) : `${p.name ?? ""}|${p.system ?? ""}|${p.environment ?? ""}|${p.country ?? ""}`,
+    naturalIdentity: (p) => `${p.name ?? ""}|${p.system ?? ""}|${p.environment ?? ""}|${p.country ?? ""}|${p.type ?? ""}`,
     fileName: (p) => p.id != null ? `${p.id} - ${safeName(p.name)}.yaml` : `${safeName(p.name)}.yaml`,
     editable: (p) => withoutVolatile(p),
     validate: (p, file) => required(p, file, ["name", "type"]),
@@ -112,6 +114,7 @@ const specs: ResourceSpec[] = [
     createPath: () => "/labels",
     updatePath: (p) => (p.id !== undefined && p.id !== null ? `/labels/${encodeURIComponent(p.id)}` : undefined),
     identity: (p) => p.id != null ? String(p.id) : `${p.system ?? ""}|${p.type ?? ""}|${p.label ?? ""}`,
+    naturalIdentity: (p) => `${p.system ?? ""}|${p.type ?? ""}|${p.label ?? ""}`,
     fileName: (p) => p.id != null ? `${p.id} - ${safeName(p.label)}.yaml` : `${safeName(p.label)}.yaml`,
     editable: (p) => withoutVolatile(p),
     validate: (p, file) => required(p, file, ["label", "type"]),
@@ -332,6 +335,16 @@ export async function pushResources(config: CerberusConfig, opts: PushResourceOp
       }
 
       if (!state) {
+        if (!server && spec.naturalIdentity) {
+          const listed = await api<Payload[]>(config, "GET", spec.listPath(config));
+          if (listed.status === 200 && Array.isArray(listed.data)) {
+            const match = listed.data.find(
+              (candidate) => spec.naturalIdentity!(candidate) === spec.naturalIdentity!(local)
+            );
+            if (match) server = await fullPayload(config, spec, match);
+          }
+        }
+
         if (server) {
           console.error(`⛔ ${spec.kind}/${spec.identity(local)} : existe déjà sur le serveur mais aucune baseline locale n'est disponible. Relancez pull.`);
           blocked++;
