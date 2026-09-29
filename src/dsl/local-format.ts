@@ -35,41 +35,125 @@ export interface ValidationIssue {
   message: string;
 }
 
+type CerberusDslMetadata = {
+  description?: string;
+  condition?: string;
+  fatal?: boolean;
+  screenshot?: "before" | "after" | "both" | "never";
+  waitBefore?: number;
+  waitAfter?: number;
+};
+
 function literal(value: unknown): string {
   return JSON.stringify(value ?? "");
 }
 
-function renderAction(action: TestAction, indent = "        "): string[] {
-  const prefix = indent + "await ";
-  let lines: string[];
+function isTrue(value: boolean | "Y" | "N" | undefined): boolean {
+  return value === true || value === "Y";
+}
 
+function hasText(value: unknown): boolean {
+  return value !== undefined && value !== null && String(value) !== "";
+}
+
+function actionMetadata(action: TestAction): CerberusDslMetadata {
+  const metadata: CerberusDslMetadata = {};
+
+  if (hasText(action.description)) metadata.description = action.description;
+  if (hasText(action.conditionOperator) && action.conditionOperator !== "always") {
+    metadata.condition = action.conditionOperator;
+  }
+  if (!isTrue(action.isFatal)) metadata.fatal = false;
+
+  const before = isTrue(action.doScreenshotBefore);
+  const after = isTrue(action.doScreenshotAfter);
+  if (before && after) metadata.screenshot = "both";
+  else if (before) metadata.screenshot = "before";
+  else if (after) metadata.screenshot = "after";
+
+  if (Number(action.waitBefore) !== 0) metadata.waitBefore = Number(action.waitBefore);
+  if (Number(action.waitAfter) !== 0) metadata.waitAfter = Number(action.waitAfter);
+
+  return metadata;
+}
+
+function hasMetadata(metadata: CerberusDslMetadata): boolean {
+  return Object.keys(metadata).length > 0;
+}
+
+function renderMetadata(metadata: CerberusDslMetadata): string {
+  return JSON.stringify(metadata);
+}
+
+function playwrightExpression(action: TestAction): string | undefined {
   switch (action.action) {
     case "openUrl":
-      lines = [`${prefix}page.goto(${literal(action.value1)});`];
-      break;
+      return `page.goto(${literal(action.value1)})`;
+
+    case "type":
+      return `page.locator(${literal(action.value1)}).fill(${literal(action.value2)})`;
+
+    case "click":
+      return `page.locator(${literal(action.value1)}).click()`;
 
     case "wait": {
       const ms = Number(action.value1 ?? 0);
-      lines = [`${prefix}page.waitForTimeout(${Number.isFinite(ms) ? ms : literal(action.value1)});`];
-      break;
+      return `page.waitForTimeout(${Number.isFinite(ms) ? ms : literal(action.value1)})`;
     }
-
-    case "executeJS": {
-      lines = [`${prefix}page.evaluate(() => {`];
-      for (const line of String(action.value1 ?? "").split(/\r?\n/)) {
-        lines.push(indent + "    " + line);
-      }
-      lines.push(indent + "});");
-      break;
-    }
-
-    case "calculateProperty":
-      lines = [`${prefix}cerberus.calculateProperty(${literal(action.value1)});`];
-      break;
 
     default:
+      return undefined;
+  }
+}
+
+function renderExecuteJs(action: TestAction, indent: string, metadata: CerberusDslMetadata): string[] {
+  const lines: string[] = [];
+  const wrapped = hasMetadata(metadata);
+
+  if (wrapped) {
+    lines.push(`${indent}await cerberus.do(`);
+    lines.push(`${indent}    page.evaluate(() => {`);
+  } else {
+    lines.push(`${indent}await page.evaluate(() => {`);
+  }
+
+  const bodyIndent = wrapped ? indent + "        " : indent + "    ";
+  for (const line of String(action.value1 ?? "").split(/\r?\n/)) {
+    lines.push(bodyIndent + line);
+  }
+
+  if (wrapped) {
+    lines.push(`${indent}    }),`);
+    lines.push(`${indent}    ${renderMetadata(metadata)}`);
+    lines.push(`${indent});`);
+  } else {
+    lines.push(`${indent}});`);
+  }
+
+  return lines;
+}
+
+function renderAction(action: TestAction, indent = "        "): string[] {
+  const metadata = actionMetadata(action);
+  let lines: string[];
+
+  if (action.action === "calculateProperty") {
+    const expression = `cerberus.calculateProperty(${literal(action.value1)})`;
+    lines = hasMetadata(metadata)
+      ? [`${indent}await cerberus.do(${expression}, ${renderMetadata(metadata)});`]
+      : [`${indent}await ${expression};`];
+  } else if (action.action === "executeJS") {
+    lines = renderExecuteJs(action, indent, metadata);
+  } else {
+    const expression = playwrightExpression(action);
+
+    if (expression) {
+      lines = hasMetadata(metadata)
+        ? [`${indent}await cerberus.do(${expression}, ${renderMetadata(metadata)});`]
+        : [`${indent}await ${expression};`];
+    } else {
       lines = [
-        `${prefix}cerberus.action(${literal(action.action)}, ${JSON.stringify({
+        `${indent}await cerberus.action(${literal(action.action)}, ${JSON.stringify({
           value1: action.value1,
           value2: action.value2,
           value3: action.value3,
@@ -82,14 +166,15 @@ function renderAction(action: TestAction, indent = "        "): string[] {
           description: action.description,
         })});`,
       ];
+    }
   }
 
   for (const control of action.controls ?? []) {
     lines.push(
-      `${prefix}cerberus.control(${literal(control.control)}, ${JSON.stringify({
-        value1: (control as any).value1,
-        value2: (control as any).value2,
-        value3: (control as any).value3,
+      `${indent}await cerberus.control(${literal(control.control)}, ${JSON.stringify({
+        value1: control.value1,
+        value2: control.value2,
+        value3: control.value3,
         conditionOperator: control.conditionOperator,
         isFatal: control.isFatal,
         doScreenshotBefore: control.doScreenshotBefore,
@@ -175,35 +260,37 @@ function sourceLine(source: ts.SourceFile, node: ts.Node): number {
   return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
 }
 
-function parseObjectArg(call: ts.CallExpression, index: number): Record<string, unknown> {
-  const arg = call.arguments[index];
+function parseLiteral(value: ts.Expression): unknown {
+  if (ts.isStringLiteralLike(value) || ts.isNoSubstitutionTemplateLiteral(value)) return value.text;
+  if (ts.isNumericLiteral(value)) return Number(value.text);
+  if (value.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (value.kind === ts.SyntaxKind.FalseKeyword) return false;
+  return undefined;
+}
+
+function parseObjectExpression(arg: ts.Expression | undefined): Record<string, unknown> {
   if (!arg || !ts.isObjectLiteralExpression(arg)) return {};
+
   const result: Record<string, unknown> = {};
   for (const prop of arg.properties) {
     if (!ts.isPropertyAssignment(prop)) continue;
     const key =
       ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
     if (!key) continue;
-    const value = prop.initializer;
-    if (ts.isStringLiteralLike(value) || ts.isNoSubstitutionTemplateLiteral(value)) result[key] = value.text;
-    else if (ts.isNumericLiteral(value)) result[key] = Number(value.text);
-    else if (value.kind === ts.SyntaxKind.TrueKeyword) result[key] = true;
-    else if (value.kind === ts.SyntaxKind.FalseKeyword) result[key] = false;
+
+    const value = parseLiteral(prop.initializer);
+    if (value !== undefined) result[key] = value;
   }
+
   return result;
 }
 
-function parseActionCall(
-  call: ts.CallExpression,
-  source: ts.SourceFile,
-  template: TestAction | undefined,
-  issues: ValidationIssue[]
-): TestAction | undefined {
-  if (!ts.isPropertyAccessExpression(call.expression)) return undefined;
+function parseObjectArg(call: ts.CallExpression, index: number): Record<string, unknown> {
+  return parseObjectExpression(call.arguments[index]);
+}
 
-  const receiver = call.expression.expression;
-  const method = call.expression.name.text;
-  const base: TestAction = template
+function baseAction(template: TestAction | undefined): TestAction {
+  return template
     ? { ...template, controls: [...(template.controls ?? [])] }
     : {
         testFolderId: "",
@@ -220,6 +307,31 @@ function parseActionCall(
         waitAfter: 0,
         controls: [],
       };
+}
+
+function locatorValue(call: ts.CallExpression): string | undefined {
+  if (!ts.isPropertyAccessExpression(call.expression)) return undefined;
+  const receiver = call.expression.expression;
+  if (!ts.isCallExpression(receiver)) return undefined;
+  if (!ts.isPropertyAccessExpression(receiver.expression)) return undefined;
+  if (!ts.isIdentifier(receiver.expression.expression) || receiver.expression.expression.text !== "page") {
+    return undefined;
+  }
+  if (receiver.expression.name.text !== "locator") return undefined;
+  return stringArg(receiver, 0);
+}
+
+function parseMappedCall(
+  call: ts.CallExpression,
+  source: ts.SourceFile,
+  template: TestAction | undefined,
+  issues: ValidationIssue[]
+): TestAction | undefined {
+  if (!ts.isPropertyAccessExpression(call.expression)) return undefined;
+
+  const receiver = call.expression.expression;
+  const method = call.expression.name.text;
+  const base = baseAction(template);
 
   if (ts.isIdentifier(receiver) && receiver.text === "page") {
     if (method === "goto") {
@@ -254,6 +366,22 @@ function parseActionCall(
     }
   }
 
+  const locator = locatorValue(call);
+  if (locator !== undefined) {
+    if (method === "fill") {
+      const value = stringArg(call, 0);
+      if (value === undefined) {
+        issues.push({ file: source.fileName, line: sourceLine(source, call), message: "locator.fill() requires a literal value." });
+        return undefined;
+      }
+      return { ...base, action: "type", value1: locator, value2: value };
+    }
+
+    if (method === "click") {
+      return { ...base, action: "click", value1: locator };
+    }
+  }
+
   if (ts.isIdentifier(receiver) && receiver.text === "cerberus" && method === "calculateProperty") {
     const value = stringArg(call, 0);
     if (value === undefined) {
@@ -267,6 +395,64 @@ function parseActionCall(
     return { ...base, action: "calculateProperty", value1: value };
   }
 
+  return undefined;
+}
+
+function applyDslMetadata(action: TestAction, metadata: Record<string, unknown>): TestAction {
+  const result = { ...action };
+
+  if (typeof metadata.description === "string") result.description = metadata.description;
+  if (typeof metadata.condition === "string") result.conditionOperator = metadata.condition;
+  if (typeof metadata.fatal === "boolean") result.isFatal = metadata.fatal;
+  if (typeof metadata.waitBefore === "number") result.waitBefore = metadata.waitBefore;
+  if (typeof metadata.waitAfter === "number") result.waitAfter = metadata.waitAfter;
+
+  if (typeof metadata.screenshot === "string") {
+    result.doScreenshotBefore = metadata.screenshot === "before" || metadata.screenshot === "both";
+    result.doScreenshotAfter = metadata.screenshot === "after" || metadata.screenshot === "both";
+  }
+
+  return result;
+}
+
+function parseActionCall(
+  call: ts.CallExpression,
+  source: ts.SourceFile,
+  template: TestAction | undefined,
+  issues: ValidationIssue[]
+): TestAction | undefined {
+  if (!ts.isPropertyAccessExpression(call.expression)) return undefined;
+
+  const receiver = call.expression.expression;
+  const method = call.expression.name.text;
+
+  if (ts.isIdentifier(receiver) && receiver.text === "cerberus" && method === "do") {
+    const inner = call.arguments[0];
+    if (!inner || !ts.isCallExpression(inner)) {
+      issues.push({
+        file: source.fileName,
+        line: sourceLine(source, call),
+        message: "cerberus.do() requires a Playwright/Cerberus call as first argument.",
+      });
+      return undefined;
+    }
+
+    const action = parseMappedCall(inner, source, template, issues);
+    if (!action) {
+      issues.push({
+        file: source.fileName,
+        line: sourceLine(source, inner),
+        message: `Unsupported expression inside cerberus.do(): ${inner.expression.getText(source)}`,
+      });
+      return undefined;
+    }
+
+    return applyDslMetadata(action, parseObjectExpression(call.arguments[1]));
+  }
+
+  const mapped = parseMappedCall(call, source, template, issues);
+  if (mapped) return mapped;
+
   if (ts.isIdentifier(receiver) && receiver.text === "cerberus" && method === "action") {
     const actionName = stringArg(call, 0);
     if (!actionName) {
@@ -277,7 +463,7 @@ function parseActionCall(
       });
       return undefined;
     }
-    return { ...base, ...parseObjectArg(call, 1), action: actionName } as TestAction;
+    return { ...baseAction(template), ...parseObjectArg(call, 1), action: actionName } as TestAction;
   }
 
   issues.push({
@@ -341,6 +527,7 @@ export function parseSpec(
             });
             continue;
           }
+
           const controlName = stringArg(expression, 0);
           if (!controlName) {
             issues.push({
@@ -350,7 +537,10 @@ export function parseSpec(
             });
             continue;
           }
-          const existing = originalStep?.actions?.[actions.length - 1]?.controls?.[lastAction.controls?.length ?? 0];
+
+          const existing =
+            originalStep?.actions?.[actions.length - 1]?.controls?.[lastAction.controls?.length ?? 0];
+
           const control: TestControl = {
             ...(existing ?? {
               testFolderId: lastAction.testFolderId,
@@ -370,11 +560,17 @@ export function parseSpec(
             ...parseObjectArg(expression, 1),
             control: controlName,
           } as TestControl;
+
           lastAction.controls = [...(lastAction.controls ?? []), control];
           continue;
         }
 
-        const action = parseActionCall(expression, source, originalStep?.actions?.[actions.length], issues);
+        const action = parseActionCall(
+          expression,
+          source,
+          originalStep?.actions?.[actions.length],
+          issues
+        );
         if (!action) continue;
 
         action.sort = actions.length + 1;
