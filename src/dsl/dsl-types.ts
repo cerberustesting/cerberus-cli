@@ -91,6 +91,72 @@ interface Cerberus {
     calculateProperty(property: string): Promise<void>;
 }
 
+interface CerberusTestOptions {
+    /** Playwright-compatible tags, mapped to existing Cerberus labels. */
+    tag?: string | string[];
+    annotation?: { type: string; description?: string } | Array<{ type: string; description?: string }>;
+}
+
+interface CerberusApplicationObject {
+    application: string;
+    object: string;
+    value: string;
+    screenshotFilename?: string;
+    xOffset?: string;
+    yOffset?: string;
+}
+
+interface CerberusService {
+    service: string;
+    application?: string;
+    type: string;
+    method: string;
+    servicePath?: string;
+    isFollowingRedirection?: boolean;
+    fileName?: string;
+    operation?: string;
+    attachementURL?: string;
+    serviceRequest?: string;
+    serviceRequestExtra1?: string;
+    kafkaTopic?: string;
+    kafkaKey?: string;
+    kafkaFilterPath?: string;
+    kafkaFilterValue?: string;
+    group?: string;
+    description?: string;
+    headers?: Array<Record<string, unknown>>;
+    contents?: Array<Record<string, unknown>>;
+}
+
+interface CerberusDataLib {
+    id?: number;
+    name: string;
+    system?: string;
+    environment?: string;
+    country?: string;
+    type: "INTERNAL" | "SQL" | "SERVICE" | "FILE" | string;
+    group?: string;
+    privateData?: string;
+    description?: string;
+    database?: string;
+    script?: string;
+    databaseUrl?: string;
+    service?: string;
+    servicePath?: string;
+    method?: string;
+    envelope?: string;
+    databaseCsv?: string;
+    csvUrl?: string;
+    separator?: string;
+    ignoreFirstLine?: boolean;
+    subData?: Array<Record<string, unknown>>;
+}
+
+declare function test(
+    name: string,
+    options: CerberusTestOptions,
+    body: (fixtures: { page: CerberusPage; request: CerberusRequest; cerberus: Cerberus }) => Promise<void>
+): void;
 declare function test(
     name: string,
     body: (fixtures: { page: CerberusPage; request: CerberusRequest; cerberus: Cerberus }) => Promise<void>
@@ -113,7 +179,7 @@ const TSCONFIG = {
         noEmit: true,
         skipLibCheck: true,
     },
-    include: [".cerberus/cerberus-dsl.d.ts", "**/*.spec.ts"],
+    include: [".cerberus/cerberus-dsl.d.ts", "**/*.spec.ts", "applicationObjects/**/*.ts", "services/**/*.ts", "datalib/**/*.ts"],
 };
 
 /** Écrit les types du DSL et un tsconfig minimal (créé seulement s'il n'existe pas) dans le dossier des tests. */
