@@ -21,73 +21,63 @@ export interface InitOptions {
 
 function instructions(dir: string): string {
     return `${BLOCK_START}
-## Tests Cerberus
+## Cerberus DSL
 
-Le repository local Cerberus vit dans :
-- \`${dir}/tests/<testFolderId>/<testcaseId - description>/\` : testcases et scénarios Playwright-like.
-- \`${dir}/applicationObjects/\` : objets applicatifs / sélecteurs partagés.
-- \`${dir}/services/\` : définitions de services utilisées pour les appels API Cerberus.
-- \`${dir}/datalib/\` : bibliothèques de données Cerberus.
-- \`${dir}/labels/\` : labels Cerberus attachables notamment aux testcases.
-- \`${dir}/.cerberus/\` : fichiers techniques du CLI (schémas/types).
+Le workspace local vit dans :
+- \`${dir}/tests/<testFolder>/<testcase>/testcase.ts\` : définition complète du testcase ;
+- \`${dir}/tests/<testFolder>/<testcase>/.sync/baseline.json\` : baseline technique du dernier pull ;
+- \`${dir}/applicationObjects/*.ts\`, \`${dir}/services/*.ts\`, \`${dir}/datalib/*.ts\` : ressources partagées ;
+- \`${dir}/.cerberus/\` : types et catalogues techniques du workspace.
 
-Pour un testcase :
-- \`${dir}/tests/<testFolderId>/<testcaseId - description>/script.ts\` : scénario Playwright-like éditable.
-- \`${dir}/tests/<testFolderId>/<testcaseId - description>/header.yaml\` : métadonnées Cerberus.
-- \`${dir}/tests/<testFolderId>/<testcaseId - description>/.sync/baseline.json\` : baseline serveur utilisée pour le round-trip, ne pas éditer manuellement.
-- \`${dir}/tests/<testFolderId>/<testcaseId - description>/.sync/conflict-vN.json\` : version serveur en conflit.
-- \`${dir}/.cerberus/cerberus-dsl.d.ts\` et \`${dir}/tsconfig.json\` : types du DSL pour l'IDE.
+Un testcase est un DSL TypeScript déclaratif, interprété par le CLI et jamais exécuté :
+
+\`\`\`ts
+cerberus.testcase({
+  name: "Login",
+  application: "SHOP",
+  tags: ["smoke"],
+  countries: ["FR"],
+
+  script: ({ step, action, control, property, object, datalib }) => {
+    property.define({
+      USER: property.fromDataLib("CERBERUS_USER")
+    });
+
+    step("Login", () => {
+      action
+        .feedField(object("USERNAME"), property.value("USER"))
+        .description("Feed login")
+        .fatal(false);
+
+      action
+        .click(object("LOGIN_BUTTON"))
+        .description("Submit login");
+
+      control.verifyTextContains(object("WELCOME"), "Welcome");
+    });
+  }
+});
+\`\`\`
+
+Principes :
+- \`cerberus.testcase({...})\` porte le header compact et le script ;
+- \`property.*\` définit les propriétés ; \`property.value("X")\` référence \`%property.X%\` ;
+- \`step(...)\` structure le scénario ; \`step.library(...)\` référence un step de librairie ;
+- \`action.*\` exécute les actions Cerberus ; les attributs se chaînent avec \`.description()\`, \`.fatal()\`, \`.condition()\`, \`.screenshot()\`, \`.waitBefore()\`, \`.waitAfter()\` ;
+- \`control.*\` exprime les contrôles Cerberus et se rattache à l'action précédente du même step ;
+- \`object("NAME")\` référence \`%object.NAME.value%\` ;
+- \`datalib.value("NAME", "SUBDATA")\` référence \`%datalib.NAME.SUBDATA%\` ;
+- \`action.custom(...)\` et \`control.custom(...)\` sont les escape hatches pour les capacités non encore typées.
 
 Commandes :
-- \`cerberus pull\` : synchronise les testcases, applicationObjects, services, datalib et labels vers le workspace local.
-- \`cerberus prepare [dossier/id ...]\` : analyse un test Playwright avant Cerberusification. Il signale les actions hors
-  \`cerberus.step(...)\`, le nombre d'actions enrichies avec \`cerberus.do(...)\` et les descriptions. \`--json\`
-  fournit un diagnostic exploitable par une IA. Cette commande ne modifie jamais le test.
-- \`cerberus validate\` : valide le DSL avant push. Un Playwright pur peut servir de brouillon, mais \`validate\` bloque tant
-  qu'il reste des actions hors \`cerberus.step(...)\`.
-- \`cerberus push [dossier/id ...]\` : sans référence, pousse les tests et ressources modifiés du workspace ; avec une référence testcase, ne pousse que ce testcase. Garde-fous : Si le testcase n'existe pas encore, il le crée via l'API publique puis relit et vérifie le résultat. S'il existe, il refuse si le serveur a changé depuis
-  le dernier pull (utiliser \`merge\`), sauvegarde l'état serveur dans \`.sync/backups/\` avant l'envoi, puis relit le testcase et
-  échoue si pays, propriétés ou étapes diffèrent. Options : \`--dry-run\`, \`--all\`, \`--force\` (écrase le serveur, à éviter).
-- \`cerberus merge [dossier/id ...]\` : fusion à trois voies (dernier pull, local, serveur). Les conflits ne sont jamais tranchés
-  en silence : sans option, rien n'est écrit ; \`--ours\` garde le local, \`--theirs\` garde le serveur, \`--dry-run\` prévisualise.
-  Ce qui a disparu du serveur est conservé localement (\`--apply-deletions\` pour le supprimer aussi). Ne jamais supprimer les
-  sauvegardes de \`.sync/backups/\` sans l'accord de l'utilisateur.
-- \`cerberus run <dossier>/<testcaseId> [...]\` : lance des tests sur Cerberus et attend le résultat.
-  Options : \`-f/--folder <dossier>\` (tous les tests locaux du dossier), \`-c/--country FR\`, \`-e/--env QA\`,
-  \`-r/--robot <nom>\` (options répétables), \`--tag\`, \`--timeout <s>\`, \`--junit report.xml\`, \`--json\`, \`--no-wait\`.
-  Pays, environnement et robot peuvent aussi venir de \`cerberus.config.json\`.
-  Code de sortie : 0 tout OK, 1 test en échec, 2 erreur d'usage ou d'API.
-  Le serveur exécute la version poussée : faire \`validate\` puis \`push\` avant \`run\` après une modification.
-- Authentification, jamais dans le dépôt : \`cerberus login\` (OAuth via le navigateur si le serveur l'active, sinon clé API ; \`--api-key\` ou \`--oauth\` pour forcer), \`cerberus whoami\`, \`cerberus logout\`. En CI : variable \`CERBERUS_API_KEY\`.
+- \`cerberus pull\` synchronise tests et ressources ;
+- \`cerberus prepare [dossier/id ...]\` analyse la structure du DSL sans mutation ;
+- \`cerberus validate\` valide le DSL ;
+- \`cerberus push [dossier/id ...]\` pousse les changements, avec \`--dry-run\`, \`--all\`, \`--force\` ;
+- \`cerberus merge [dossier/id ...]\` fusionne base/local/serveur ;
+- \`cerberus run <dossier>/<testcaseId> [...]\` exécute la version poussée sur Cerberus.
 
-Le DSL est volontairement contraint :
-- \`page.*\` et \`page.locator(...).*\` utilisent le vocabulaire Playwright Web réel ;
-- \`request.*\` est réservé au vocabulaire Playwright API réel ; un appel HTTP n'est accepté au push que s'il existe un mapping
-  Cerberus réellement équivalent ;
-- \`cerberus.do(playwrightAction, metadata)\` ajoute description, condition, screenshot, fatalité ou waits sans remplacer l'action Playwright ;
-- \`cerberus.libraryStep({ testFolder, testcase, step, description? })\` conserve une référence vers un step de librairie sans dupliquer ses actions ;
-- \`cerberus.*\` porte les capacités propres à Cerberus ; une action sans mapping Playwright reste \`cerberus.action(...)\`.
-Les URL, durées, noms de propriété/action/contrôle doivent être des littéraux : \`cerberus validate\` refuse le reste.
-Un \`cerberus.control(...)\` doit suivre l'action qu'il vérifie.
-
-### Workflow IA : « convertis en Cerberus et push »
-
-Quand l'utilisateur demande « convertis en Cerberus », « Cerberusify », « convertis en Cerberus et push » ou une formulation équivalente :
-1. lancer \`cerberus prepare <dossier/id> --json\` pour analyser le Playwright existant ;
-2. conserver autant que possible le code Playwright natif ;
-3. regrouper les actions en \`cerberus.step(...)\` selon leur intention fonctionnelle, et non mécaniquement une action par step ;
-   si le step provient d'une librairie Cerberus existante, utiliser \`cerberus.libraryStep(...)\` et ne jamais recopier ses actions ;
-4. ajouter \`cerberus.do(action, { description: "..." })\` seulement quand la description ou une metadata Cerberus apporte
-   une valeur utile au reporting ou à l'exécution ; ne pas wrapper systématiquement toutes les actions ;
-5. utiliser \`cerberus.*\` uniquement pour une capacité propre à Cerberus ou lorsqu'aucun mapping Playwright équivalent n'existe ;
-6. ne jamais inventer une méthode sous \`page.*\` ou \`request.*\` ;
-7. lancer \`cerberus validate\` et corriger toutes les erreurs ;
-8. lancer \`cerberus push <dossier/id> --dry-run\`, examiner les changements, puis \`cerberus push <dossier/id>\` si le résultat est cohérent.
-
-Pour créer un nouveau testcase local, créer \`${dir}/tests/<testFolder>/<nom-provisoire>/header.yaml\` et \`script.ts\` sans \`.sync/baseline.json\`. Après \`validate\`, un \`push\` crée le testcase sans envoyer de \`testcaseId\` : Cerberus attribue l'ID disponible, puis le CLI adopte cet ID et renomme le dossier local.
-
-Le rôle de l'IA est d'ajouter la structure et les métadonnées Cerberus autour du Playwright existant, pas de réécrire inutilement
-le scénario ni d'en changer l'intention fonctionnelle.
+Pour créer un testcase local, créer simplement \`${dir}/tests/<testFolder>/<nom>/testcase.ts\` sans \`.sync/baseline.json\`. Le premier push crée le testcase côté Cerberus.
 ${BLOCK_END}
 `;
 }
@@ -119,24 +109,6 @@ function ensureGitignore(root: string, entries: string[]): void {
     fs.writeFileSync(file, current + sep + missing.join("\n") + "\n", "utf8");
 }
 
-function mergeVscodeSettings(root: string, schemaRel: string, dir: string): void {
-    const file = path.join(root, ".vscode", "settings.json");
-    let settings: Record<string, any> = {};
-    if (fs.existsSync(file)) {
-        try {
-            settings = JSON.parse(fs.readFileSync(file, "utf8"));
-        } catch {
-            console.warn("⚠️  .vscode/settings.json illisible (commentaires ?) : association du schéma ignorée.");
-            return;
-        }
-    }
-    settings["yaml.schemas"] = {
-        ...(settings["yaml.schemas"] ?? {}),
-        [schemaRel]: `${dir}/tests/**/header.yaml`,
-    };
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n", "utf8");
-}
 
 function ensureWorkspaceLayout(root: string, dir: string): void {
     const workspace = path.join(root, dir);
