@@ -36,7 +36,7 @@ Commandes :
   fournit un diagnostic exploitable par une IA. Cette commande ne modifie jamais le test.
 - \`cerberus validate\` : valide le DSL avant push. Un Playwright pur peut servir de brouillon, mais \`validate\` bloque tant
   qu'il reste des actions hors \`cerberus.step(...)\`.
-- \`cerberus push [dossier/id ...]\` : envoie les tests modifiés localement, avec garde-fous. Il refuse si le serveur a changé depuis
+- \`cerberus push [dossier/id ...]\` : envoie les tests modifiés localement, avec garde-fous. Si le testcase n'existe pas encore, il le crée via l'API publique puis relit et vérifie le résultat. S'il existe, il refuse si le serveur a changé depuis
   le dernier pull (utiliser \`merge\`), sauvegarde l'état serveur dans \`.cerberus/backups/\` avant l'envoi, puis relit le testcase et
   échoue si pays, propriétés ou étapes diffèrent. Options : \`--dry-run\`, \`--all\`, \`--force\` (écrase le serveur, à éviter).
 - \`cerberus merge [dossier/id ...]\` : fusion à trois voies (dernier pull, local, serveur). Les conflits ne sont jamais tranchés
@@ -72,6 +72,8 @@ Quand l'utilisateur demande « convertis en Cerberus », « Cerberusify », « c
 6. ne jamais inventer une méthode sous \`page.*\` ou \`request.*\` ;
 7. lancer \`cerberus validate\` et corriger toutes les erreurs ;
 8. lancer \`cerberus push <dossier/id> --dry-run\`, examiner les changements, puis \`cerberus push <dossier/id>\` si le résultat est cohérent.
+
+Pour créer un nouveau testcase local, créer \`<dossier>/<testcase>/cerberus.yaml\` et \`test.spec.ts\` sans \`.cerberus/state.json\`. Après \`validate\`, un \`push\` créera le testcase. Si le serveur attribue un autre testcaseId, le CLI adopte cet ID et renomme le dossier local.
 
 Le rôle de l'IA est d'ajouter la structure et les métadonnées Cerberus autour du Playwright existant, pas de réécrire inutilement
 le scénario ni d'en changer l'intention fonctionnelle.
