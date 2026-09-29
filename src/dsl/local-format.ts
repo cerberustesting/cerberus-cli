@@ -634,7 +634,11 @@ export function parseSpec(
         const receiver = node.expression.expression;
 
         if (ts.isIdentifier(receiver) && ["page", "request"].includes(receiver.text)) {
-          isDslAction = true;
+          const method = node.expression.name.text;
+          const selectorBuilder =
+            receiver.text === "page" &&
+            ["locator", "getByRole", "getByText", "getByLabel", "getByPlaceholder", "getByTestId", "getByAltText", "getByTitle"].includes(method);
+          isDslAction = !selectorBuilder;
         } else if (
           ts.isIdentifier(receiver) &&
           receiver.text === "cerberus" &&
