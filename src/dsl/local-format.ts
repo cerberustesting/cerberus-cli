@@ -407,6 +407,28 @@ export function localTestDirName(test: Pick<TestCaseDetailed, "testcaseId" | "de
   return description ? `${test.testcaseId} - ${description}` : String(test.testcaseId);
 }
 
+export function migrateLegacyTestLayout(testDir: string): void {
+  const legacyHeader = path.join(testDir, "cerberus.yaml");
+  const header = path.join(testDir, "header.yaml");
+  if (fs.existsSync(legacyHeader) && !fs.existsSync(header)) fs.renameSync(legacyHeader, header);
+
+  const legacyScript = path.join(testDir, "test.spec.ts");
+  const script = path.join(testDir, "script.ts");
+  if (fs.existsSync(legacyScript) && !fs.existsSync(script)) fs.renameSync(legacyScript, script);
+
+  const legacyDir = path.join(testDir, ".cerberus");
+  const syncDir = path.join(testDir, ".sync");
+  if (fs.existsSync(legacyDir) && !fs.existsSync(syncDir)) {
+    fs.renameSync(legacyDir, syncDir);
+  }
+
+  if (fs.existsSync(syncDir)) {
+    const legacyState = path.join(syncDir, "state.json");
+    const baseline = path.join(syncDir, "baseline.json");
+    if (fs.existsSync(legacyState) && !fs.existsSync(baseline)) fs.renameSync(legacyState, baseline);
+  }
+}
+
 export function writeLocalTest(testDir: string, test: TestCaseDetailed): void {
   fs.mkdirSync(path.join(testDir, ".sync"), { recursive: true });
   fs.writeFileSync(path.join(testDir, "header.yaml"), YAML.stringify(toLocalMetadata(test)), "utf8");
@@ -1395,6 +1417,7 @@ function draftStateFromMetadata(testDir: string, metadata: LocalMetadata): Local
 }
 
 export function readLocalTest(testDir: string): { data: TestCaseDetailed; issues: ValidationIssue[] } {
+  migrateLegacyTestLayout(testDir);
   const metadataPath = path.join(testDir, "header.yaml");
   const specPath = path.join(testDir, "script.ts");
   const statePath = path.join(testDir, ".sync", "baseline.json");
@@ -1451,6 +1474,7 @@ export function findLocalTestDirs(baseDir: string): string[] {
       if (!testcase.isDirectory() || testcase.name.startsWith(".")) continue;
 
       const testDir = path.join(folderPath, testcase.name);
+      migrateLegacyTestLayout(testDir);
       if (
         fs.existsSync(path.join(testDir, "header.yaml")) &&
         fs.existsSync(path.join(testDir, "script.ts"))
