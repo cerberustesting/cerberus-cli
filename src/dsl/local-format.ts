@@ -104,7 +104,7 @@ function playwrightExpression(action: TestAction): string | undefined {
 
     case "type": {
       const objectName = applicationObjectName(action.value1);
-      const value = datalibExpression(action.value2) ?? literal(action.value2);
+      const value = renderDslValue(action.value2);
       return objectName
         ? `cerberus.object(${literal(objectName)}).fill(${value})`
         : `page.locator(${literal(action.value1)}).fill(${value})`;
@@ -238,8 +238,50 @@ export function toLocalMetadata(test: TestCaseDetailed): LocalMetadata {
       PROD: test.isActivePROD,
     },
     conditionOperator: test.conditionOperator,
-    properties: test.properties ?? [],
   };
+}
+
+function renderPropertyDefinition(property: NonNullable<TestCaseDetailed["properties"]>[number]): string {
+  const type = String(property.type ?? "text");
+  const value1 = property.value1 ?? "";
+
+  if (type === "text") return literal(value1);
+  if (type === "getFromDataLib") return `cerberus.fromDataLib(${literal(value1)})`;
+  if (type === "getFromJS" && !hasText(value1) && !hasText(property.value2) && !hasText(property.value3)) {
+    return "cerberus.fromJS()";
+  }
+
+  const detail: Record<string, unknown> = { type };
+  if (hasText(property.value1)) detail.value1 = property.value1;
+  if (hasText(property.value2)) detail.value2 = property.value2;
+  if (hasText(property.value3)) detail.value3 = property.value3;
+  if (hasText(property.length)) detail.length = property.length;
+  if (property.rowLimit !== undefined && property.rowLimit !== null) detail.rowLimit = property.rowLimit;
+  if (hasText(property.nature)) detail.nature = property.nature;
+  if (property.rank !== undefined && property.rank !== null) detail.rank = property.rank;
+  return JSON.stringify(detail);
+}
+
+function renderProperties(test: TestCaseDetailed): string[] {
+  const properties = test.properties ?? [];
+  if (!properties.length) return [];
+
+  const lines = ["    cerberus.properties({"];
+  properties.forEach((property, index) => {
+    const comma = index < properties.length - 1 ? "," : "";
+    lines.push(`        ${JSON.stringify(property.property)}: ${renderPropertyDefinition(property)}${comma}`);
+  });
+  lines.push("    });", "");
+  return lines;
+}
+
+function propertyExpression(value: unknown): string | undefined {
+  const match = String(value ?? "").match(/^%property\.([^.]+)%$/);
+  return match ? `cerberus.property(${literal(match[1])})` : undefined;
+}
+
+function renderDslValue(value: unknown): string {
+  return propertyExpression(value) ?? datalibExpression(value) ?? literal(value);
 }
 
 export function generateSpec(test: TestCaseDetailed): string {
@@ -255,6 +297,8 @@ export function generateSpec(test: TestCaseDetailed): string {
     "",
     `test(${literal(test.description || test.testcaseId)}${options}, async ({ page, request, cerberus }) => {`,
   ];
+
+  lines.push(...renderProperties(test));
 
   for (const step of test.steps ?? []) {
     lines.push("");
@@ -329,8 +373,17 @@ function datalibReference(expression: ts.Expression | undefined): string | undef
   return name && subData ? `%datalib.${name}.${subData}%` : undefined;
 }
 
+function propertyReference(expression: ts.Expression | undefined): string | undefined {
+  if (!expression || !ts.isCallExpression(expression)) return undefined;
+  if (!ts.isPropertyAccessExpression(expression.expression)) return undefined;
+  if (!ts.isIdentifier(expression.expression.expression) || expression.expression.expression.text !== "cerberus") return undefined;
+  if (expression.expression.name.text !== "property") return undefined;
+  const name = stringArg(expression, 0);
+  return name ? `%property.${name}%` : undefined;
+}
+
 function dslValueArg(call: ts.CallExpression, index: number): string | undefined {
-  return stringArg(call, index) ?? datalibReference(call.arguments[index]);
+  return stringArg(call, index) ?? datalibReference(call.arguments[index]) ?? propertyReference(call.arguments[index]);
 }
 
 function sourceLine(source: ts.SourceFile, node: ts.Node): number {
@@ -710,6 +763,128 @@ function assignIdentifiers(steps: TestCaseStep[], original: TestCaseDetailed): v
   }
 }
 
+function propertyTemplate(original: TestCaseDetailed, name: string, index: number): NonNullable<TestCaseDetailed["properties"]>[number] {
+  const existing = (original.properties ?? []).find((property) => property.property === name);
+  if (existing) return { ...existing, countries: [...(existing.countries ?? [])] };
+  return {
+    testFolderId: original.testFolderId,
+    testcaseId: original.testcaseId,
+    property: name,
+    type: "text",
+    value1: "",
+    value2: "",
+    value3: "",
+    nature: "STATIC",
+    rank: index + 1,
+    dateCreated: "",
+    dateModif: "",
+    countries: [],
+  };
+}
+
+function parsePropertyDefinition(
+  name: string,
+  expression: ts.Expression,
+  source: ts.SourceFile,
+  original: TestCaseDetailed,
+  index: number,
+  issues: ValidationIssue[]
+): NonNullable<TestCaseDetailed["properties"]>[number] | undefined {
+  const base = propertyTemplate(original, name, index);
+
+  if (ts.isStringLiteralLike(expression) || ts.isNoSubstitutionTemplateLiteral(expression) || ts.isNumericLiteral(expression)) {
+    return { ...base, type: "text", value1: expression.text };
+  }
+
+  if (
+    ts.isCallExpression(expression) &&
+    ts.isPropertyAccessExpression(expression.expression) &&
+    ts.isIdentifier(expression.expression.expression) &&
+    expression.expression.expression.text === "cerberus"
+  ) {
+    const method = expression.expression.name.text;
+    if (method === "fromDataLib") {
+      const value = stringArg(expression, 0);
+      if (!value) {
+        issues.push({ file: source.fileName, line: sourceLine(source, expression), message: `Property ${name}: cerberus.fromDataLib() requires a literal DataLib name.` });
+        return undefined;
+      }
+      return { ...base, type: "getFromDataLib", value1: value };
+    }
+    if (method === "fromJS") {
+      const value = stringArg(expression, 0) ?? "";
+      return { ...base, type: "getFromJS", value1: value };
+    }
+  }
+
+  if (ts.isObjectLiteralExpression(expression)) {
+    const detail = parseObjectExpression(expression);
+    if (typeof detail.type !== "string" || !detail.type) {
+      issues.push({ file: source.fileName, line: sourceLine(source, expression), message: `Property ${name}: detailed form requires a literal type.` });
+      return undefined;
+    }
+    return {
+      ...base,
+      ...detail,
+      property: name,
+      type: detail.type,
+    } as NonNullable<TestCaseDetailed["properties"]>[number];
+  }
+
+  issues.push({
+    file: source.fileName,
+    line: sourceLine(source, expression),
+    message: `Unsupported property definition for ${name}. Use a literal, cerberus.fromDataLib(...), cerberus.fromJS(...), or an object literal.`,
+  });
+  return undefined;
+}
+
+function parsePropertyDefinitions(
+  source: ts.SourceFile,
+  original: TestCaseDetailed,
+  issues: ValidationIssue[]
+): NonNullable<TestCaseDetailed["properties"]> | undefined {
+  let found: NonNullable<TestCaseDetailed["properties"]> | undefined;
+
+  const visit = (node: ts.Node): void => {
+    if (
+      !found &&
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === "cerberus" &&
+      node.expression.name.text === "properties"
+    ) {
+      const arg = node.arguments[0];
+      if (!arg || !ts.isObjectLiteralExpression(arg)) {
+        issues.push({ file: source.fileName, line: sourceLine(source, node), message: "cerberus.properties() requires an object literal." });
+        found = [];
+        return;
+      }
+
+      found = [];
+      for (const prop of arg.properties) {
+        if (!ts.isPropertyAssignment(prop)) {
+          issues.push({ file: source.fileName, line: sourceLine(source, prop), message: "cerberus.properties() only supports explicit property assignments." });
+          continue;
+        }
+        const name = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
+        if (!name) {
+          issues.push({ file: source.fileName, line: sourceLine(source, prop), message: "Property names must be literal." });
+          continue;
+        }
+        const parsed = parsePropertyDefinition(name, prop.initializer, source, original, found.length, issues);
+        if (parsed) found.push(parsed);
+      }
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(source);
+  return found;
+}
+
 function extractTestTags(source: ts.SourceFile): string[] {
   let tags: string[] = [];
 
@@ -803,12 +978,13 @@ function resolveTags(
 export function parseSpec(
   specPath: string,
   original: TestCaseDetailed
-): { steps: TestCaseStep[]; issues: ValidationIssue[]; tags: string[] } {
+): { steps: TestCaseStep[]; issues: ValidationIssue[]; tags: string[]; properties?: NonNullable<TestCaseDetailed["properties"]> } {
   const text = fs.readFileSync(specPath, "utf8");
   const source = ts.createSourceFile(specPath, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const issues: ValidationIssue[] = [];
   const steps: TestCaseStep[] = [];
   const tags = extractTestTags(source);
+  const properties = parsePropertyDefinitions(source, original, issues);
 
   const visit = (node: ts.Node): void => {
     if (
@@ -1026,7 +1202,7 @@ export function parseSpec(
   }
 
   assignIdentifiers(steps, original);
-  return { steps, issues, tags };
+  return { steps, issues, tags, properties };
 }
 
 function draftStateFromMetadata(testDir: string, metadata: LocalMetadata): LocalState {
@@ -1091,13 +1267,15 @@ export function readLocalTest(testDir: string): { data: TestCaseDetailed; issues
     isActiveUAT: metadata.active?.UAT ?? state.serverPayload.isActiveUAT,
     isActivePROD: metadata.active?.PROD ?? state.serverPayload.isActivePROD,
     conditionOperator: metadata.conditionOperator ?? state.serverPayload.conditionOperator,
-    properties: Array.isArray(metadata.properties)
-      ? (metadata.properties as TestCaseDetailed["properties"])
-      : state.serverPayload.properties,
+    properties: state.serverPayload.properties,
   };
 
   const parsed = parseSpec(specPath, data);
   data.steps = parsed.steps;
+  data.properties = parsed.properties ??
+    (Array.isArray(metadata.properties)
+      ? (metadata.properties as TestCaseDetailed["properties"])
+      : state.serverPayload.properties);
   data.labels = resolveTags(testDir, parsed.tags, state.serverPayload, parsed.issues, specPath);
   return { data, issues: parsed.issues };
 }
