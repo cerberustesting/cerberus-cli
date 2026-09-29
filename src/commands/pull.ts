@@ -10,6 +10,7 @@ import {
   generateSpec,
   LocalState,
   localTestDirName,
+  migrateLegacyTestLayout,
   toLocalMetadata,
   writeLocalTest,
 } from "../dsl/local-format.js";
@@ -50,12 +51,14 @@ function existingTestDir(outputDir: string, testFolderId: string, testcaseId: st
 
   for (const entry of fs.readdirSync(folderDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-    const metadataPath = path.join(folderDir, entry.name, "header.yaml");
+    const testDir = path.join(folderDir, entry.name);
+    migrateLegacyTestLayout(testDir);
+    const metadataPath = path.join(testDir, "header.yaml");
     if (!fs.existsSync(metadataPath)) continue;
     try {
       const metadata = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
       if (String(metadata.testcase ?? metadata.testcaseId ?? "") === String(testcaseId)) {
-        return path.join(folderDir, entry.name);
+        return testDir;
       }
     } catch {
       // Ignore malformed local metadata here; pull will recreate a clean directory if needed.
