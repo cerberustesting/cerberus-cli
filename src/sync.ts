@@ -112,7 +112,35 @@ export async function fetchServerTest(
     return ((await res.json()) as CerberusTestCaseResponse).data;
 }
 
-/** Envoie un testcase. Le GET omet bugs/conditionOptions quand ils sont vides ; le PUT les exige. */
+/**
+ * Le GET public omet les tableaux vides (bugs, conditionOptions, options) et une action créée localement
+ * ne les a jamais ; or le serveur appelle .toString() dessus à l'insertion et plante (NPE) s'ils manquent.
+ * On les complète avec [] dans le corps envoyé, sans toucher aux fichiers locaux.
+ */
+export function withRequiredDefaults<T extends TestCaseDetailed>(test: T): T {
+    const arr = (v: unknown) => (v == null ? [] : v);
+    return {
+        ...test,
+        bugs: arr((test as any).bugs),
+        conditionOptions: arr((test as any).conditionOptions),
+        steps: (test.steps ?? []).map((step) => ({
+            ...step,
+            conditionOptions: arr((step as any).conditionOptions),
+            actions: (step.actions ?? []).map((action) => ({
+                ...action,
+                conditionOptions: arr((action as any).conditionOptions),
+                options: arr((action as any).options),
+                controls: (action.controls ?? []).map((control) => ({
+                    ...control,
+                    conditionOptions: arr((control as any).conditionOptions),
+                    options: arr((control as any).options),
+                })),
+            })),
+        })),
+    } as T;
+}
+
+/** Envoie un testcase existant (PUT). */
 export async function putServerTest(config: CerberusConfig, test: TestCaseDetailed, serverVersion: number | string): Promise<Response> {
     return fetch(testUrl(config, test), {
         method: "PUT",
@@ -120,11 +148,9 @@ export async function putServerTest(config: CerberusConfig, test: TestCaseDetail
         redirect: "manual",
         headers: await baseHeaders(config, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-            ...test,
+            ...withRequiredDefaults(test),
             // le serveur ajoute 1 à la version reçue : on part de sa version réelle pour ne jamais la faire reculer
             version: Number(serverVersion),
-            bugs: (test as any).bugs ?? [],
-            conditionOptions: (test as any).conditionOptions ?? [],
         }),
     });
 }
@@ -140,10 +166,8 @@ export async function createServerTest(config: CerberusConfig, test: TestCaseDet
         redirect: "manual",
         headers: await baseHeaders(config, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-            ...creationPayload,
+            ...withRequiredDefaults(creationPayload as TestCaseDetailed),
             version: Number(test.version ?? 0),
-            bugs: (test as any).bugs ?? [],
-            conditionOptions: (test as any).conditionOptions ?? [],
         }),
     });
 }
