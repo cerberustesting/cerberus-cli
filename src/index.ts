@@ -10,6 +10,7 @@ import { initCommand } from "./commands/init.js";
 import { mergeCommand } from "./commands/merge.js";
 import { validateCommand } from "./commands/validate.js";
 import { runCommand } from "./commands/run.js";
+import { prepareCommand } from "./commands/prepare.js";
 
 const pkg = JSON.parse(
     fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf8")
@@ -69,6 +70,15 @@ program
     .option("--no-wait", "n'attend pas la fin des exécutions")
     .action(async (testcases: string[], opts) => {
         const code = await runCommand(testcases ?? [], opts);
+        if (code !== 0) process.exitCode = code;
+    });
+
+program
+    .command("prepare [tests...]")
+    .description("Analyse un test Playwright et indique comment le structurer pour Cerberus")
+    .option("--json", "sortie JSON pour les assistants IA")
+    .action(async (tests: string[], opts) => {
+        const code = await prepareCommand(tests ?? [], opts);
         if (code !== 0) process.exitCode = code;
     });
 
