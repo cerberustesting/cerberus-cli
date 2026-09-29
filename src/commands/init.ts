@@ -22,7 +22,7 @@ function instructions(dir: string): string {
     return `${BLOCK_START}
 ## Tests Cerberus
 
-Les tests fonctionnels vivent dans :
+Le repository local Cerberus vit dans :
 - \`${dir}/<testFolderId>/<testcaseId>/test.spec.ts\` : scénario Playwright-like éditable.
 - \`${dir}/<testFolderId>/<testcaseId>/cerberus.yaml\` : métadonnées Cerberus.
 - \`${dir}/<testFolderId>/<testcaseId>/.cerberus/state.json\` : état technique de round-trip, ne pas éditer manuellement.
@@ -152,7 +152,7 @@ export function initCommand(opts: InitOptions): void {
     console.log("✅ Schéma installé et associé dans VS Code (extension YAML de Red Hat requise)");
 
     writeDslTypes(path.join(root, dir));
-    console.log("✅ Types du DSL installés (tests/tsconfig.json + .cerberus/cerberus-dsl.d.ts)");
+    console.log("✅ Types du DSL installés (cerberus/tsconfig.json + .cerberus/cerberus-dsl.d.ts)");
 
     ensureGitignore(root, ["cerberus.config.json", `${dir}/**/.cerberus/conflict-*.json`]);
 
