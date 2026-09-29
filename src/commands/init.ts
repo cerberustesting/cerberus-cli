@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { writeDslTypes } from "../dsl/dsl-types.js";
 
 const SCHEMA_SRC = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -25,16 +26,32 @@ Les tests fonctionnels vivent dans :
 - \`${dir}/<testFolderId>/<testcaseId>/test.spec.ts\` : scénario Playwright-like éditable.
 - \`${dir}/<testFolderId>/<testcaseId>/cerberus.yaml\` : métadonnées Cerberus.
 - \`${dir}/<testFolderId>/<testcaseId>/.cerberus/state.json\` : état technique de round-trip, ne pas éditer manuellement.
+- \`${dir}/<testFolderId>/<testcaseId>/.cerberus/conflict-vN.json\` : version serveur en conflit avec vos modifications locales, à résoudre puis supprimer.
+- \`${dir}/.cerberus/cerberus-dsl.d.ts\` et \`${dir}/tsconfig.json\` : types du DSL pour l'IDE, régénérés par \`pull\`, ne pas éditer.
 
 Commandes :
 - \`cerberus pull\` : télécharge et convertit les tests vers le format local.
 - \`cerberus validate\` : valide le DSL avant push.
-- \`cerberus push\` : reconstruit le payload Cerberus et l'envoie au serveur.
-- La clé API n'est jamais dans le dépôt : \`cerberus login\` ou \`CERBERUS_API_KEY\`.
+- \`cerberus push [dossier/id ...]\` : envoie les tests modifiés localement, avec garde-fous. Il refuse si le serveur a changé depuis
+  le dernier pull (utiliser \`merge\`), sauvegarde l'état serveur dans \`.cerberus/backups/\` avant l'envoi, puis relit le testcase et
+  échoue si pays, propriétés ou étapes diffèrent. Options : \`--dry-run\`, \`--all\`, \`--force\` (écrase le serveur, à éviter).
+- \`cerberus merge [dossier/id ...]\` : fusion à trois voies (dernier pull, local, serveur). Les conflits ne sont jamais tranchés
+  en silence : sans option, rien n'est écrit ; \`--ours\` garde le local, \`--theirs\` garde le serveur, \`--dry-run\` prévisualise.
+  Ce qui a disparu du serveur est conservé localement (\`--apply-deletions\` pour le supprimer aussi). Ne jamais supprimer les
+  sauvegardes de \`.cerberus/backups/\` sans l'accord de l'utilisateur.
+- \`cerberus run <dossier>/<testcaseId> [...]\` : lance des tests sur Cerberus et attend le résultat.
+  Options : \`-f/--folder <dossier>\` (tous les tests locaux du dossier), \`-c/--country FR\`, \`-e/--env QA\`,
+  \`-r/--robot <nom>\` (options répétables), \`--tag\`, \`--timeout <s>\`, \`--junit report.xml\`, \`--json\`, \`--no-wait\`.
+  Pays, environnement et robot peuvent aussi venir de \`cerberus.config.json\`.
+  Code de sortie : 0 tout OK, 1 test en échec, 2 erreur d'usage ou d'API.
+  Le serveur exécute la version poussée : faire \`validate\` puis \`push\` avant \`run\` après une modification.
+- Authentification, jamais dans le dépôt : \`cerberus login\` (OAuth via le navigateur si le serveur l'active, sinon clé API ; \`--api-key\` ou \`--oauth\` pour forcer), \`cerberus whoami\`, \`cerberus logout\`. En CI : variable \`CERBERUS_API_KEY\`.
 
 Le DSL est volontairement contraint. Les actions courantes utilisent une syntaxe Playwright-like
 (\`page.goto\`, \`page.evaluate\`, \`page.waitForTimeout\`) et les primitives Cerberus
 utilisent \`cerberus.*\`. Les actions non mappées sont conservées avec \`cerberus.action(...)\`.
+Les URL, durées, noms de propriété/action/contrôle doivent être des littéraux : \`cerberus validate\` refuse le reste.
+Un \`cerberus.control(...)\` doit suivre l'action qu'il vérifie.
 ${BLOCK_END}
 `;
 }
@@ -109,7 +126,10 @@ export function initCommand(opts: InitOptions): void {
     mergeVscodeSettings(root, `./${dir}/.cerberus/cerberus-testcase.schema.json`, dir);
     console.log("✅ Schéma installé et associé dans VS Code (extension YAML de Red Hat requise)");
 
-    ensureGitignore(root, ["cerberus.config.json", `${dir}/*.conflict-*.yaml`, `${dir}/**/*.conflict-*.yaml`]);
+    writeDslTypes(path.join(root, dir));
+    console.log("✅ Types du DSL installés (tests/tsconfig.json + .cerberus/cerberus-dsl.d.ts)");
+
+    ensureGitignore(root, ["cerberus.config.json", `${dir}/**/.cerberus/conflict-*.json`]);
 
     const block = instructions(dir);
     upsertBlock(path.join(root, "AGENTS.md"), block, "# Instructions pour les assistants IA\n\n");

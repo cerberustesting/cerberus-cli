@@ -4,3 +4,4 @@ cerberus.config.json
 tests/
 .idea/
 .DS_Store
+.backup/

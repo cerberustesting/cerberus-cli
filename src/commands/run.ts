@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import fetch from "node-fetch";
 import YAML from "yaml";
 import { loadConfig, CerberusConfig } from "../config.js";
 import { ExecutionResult, toJUnit, verdictOf } from "../junit.js";
@@ -77,7 +76,7 @@ async function api<T>(config: CerberusConfig, method: string, url: string, body?
         method,
         headers: {
             accept: "application/json",
-            "X-API-KEY": config.apiKey,
+            ...(await config.authHeaders()),
             "X-API-VERSION": config.apiVersion,
             ...(body ? { "Content-Type": "application/json" } : {}),
         },

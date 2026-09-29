@@ -5,8 +5,9 @@ import { fileURLToPath } from "url";
 import { Command } from "commander";
 import { pullTests } from "./commands/pull.js";
 import { pushCommand } from "./commands/push.js";
-import { loginCommand } from "./commands/login.js";
+import { loginCommand, logoutCommand, whoamiCommand } from "./commands/login.js";
 import { initCommand } from "./commands/init.js";
+import { mergeCommand } from "./commands/merge.js";
 import { validateCommand } from "./commands/validate.js";
 import { runCommand } from "./commands/run.js";
 
@@ -29,10 +30,26 @@ program
     });
 
 program
-    .command("push")
-    .description("Met à jour le serveur Cerberus avec les fichiers locaux")
-    .action(async () => {
-        await pushCommand();
+    .command("push [tests...]")
+    .description("Envoie les tests modifiés localement (avec garde-fous : serveur inchangé, sauvegarde, relecture)")
+    .option("--all", "envoie aussi les tests sans modification locale")
+    .option("--force", "envoie même si le serveur a changé depuis le dernier pull (écrase ses changements)")
+    .option("--dry-run", "montre ce qui serait envoyé sans rien modifier")
+    .action(async (tests: string[], opts) => {
+        const code = await pushCommand(tests ?? [], opts);
+        if (code !== 0) process.exitCode = code;
+    });
+
+program
+    .command("merge [tests...]")
+    .description("Fusionne l'état du serveur dans vos fichiers locaux (fusion à trois voies)")
+    .option("--ours", "en cas de conflit, garde votre version locale")
+    .option("--theirs", "en cas de conflit, garde la version du serveur")
+    .option("--apply-deletions", "supprime aussi en local ce qui a été supprimé sur le serveur (sinon conservé, un push le recrée)")
+    .option("--dry-run", "montre la fusion sans rien écrire")
+    .action(async (tests: string[], opts) => {
+        const code = await mergeCommand(tests ?? [], opts);
+        if (code !== 0) process.exitCode = code;
     });
 
 const collect = (value: string, previous: string[]): string[] => [...previous, value];
@@ -73,11 +90,24 @@ program
 
 program
     .command("login")
-    .description("Enregistre la clé API hors du dépôt (~/.config/cerberus)")
-    .option("--api-key <key>", "clé API (sinon saisie masquée)")
-    .action(async (opts: { apiKey?: string }) => {
-        await loginCommand(opts.apiKey);
+    .description("S'authentifie : OAuth (navigateur) si le serveur l'active, sinon clé API")
+    .option("--api-key [key]", "enregistre une clé API (saisie masquée si omise)")
+    .option("--oauth", "force la connexion OAuth (Keycloak)")
+    .option("--port <port>", "port local de la redirection OAuth", "18080")
+    .option("--client-id <id>", "client Keycloak à utiliser (défaut : celui annoncé par le serveur)")
+    .action(async (opts) => {
+        await loginCommand(opts);
     });
+
+program
+    .command("logout")
+    .description("Supprime les identifiants enregistrés (~/.config/cerberus)")
+    .action(() => logoutCommand());
+
+program
+    .command("whoami")
+    .description("Affiche le mode d'authentification actif")
+    .action(() => whoamiCommand());
 
 program.parseAsync().catch((err: Error) => {
     console.error(`❌ ${err.message}`);

@@ -16,7 +16,6 @@
   },
   "dependencies": {
     "commander": "^12.1.0",
-    "node-fetch": "^3.3.2",
     "yaml": "^2.6.0",
     "typescript": "^5.3.3"
   },
@@ -24,7 +23,7 @@
     "ts-node": "^10.9.1",
     "@types/node": "^22.0.0"
   },
-  "description": "CLI Cerberus : synchronise les tests Cerberus (YAML) avec le dépôt du développeur",
+  "description": "CLI Cerberus : synchronise les tests Cerberus (YAML) avec le d\u00e9p\u00f4t du d\u00e9veloppeur",
   "files": [
     "dist",
     "schema",

@@ -1,9 +1,10 @@
 import fs from "fs";
 import path from "path";
-import fetch from "node-fetch";
 import YAML from "yaml";
 import { execSync } from "child_process";
 import { loadConfig } from "../config.js";
+import { isLocallyModified } from "../sync.js";
+import { writeDslTypes } from "../dsl/dsl-types.js";
 import {
   generateSpec,
   LocalState,
@@ -41,41 +42,20 @@ function initLocalGitRepo(baseDir: string): void {
   }
 }
 
-function isLocallyModified(testDir: string): boolean {
-  const statePath = path.join(testDir, ".cerberus", "state.json");
-  const metadataPath = path.join(testDir, "cerberus.yaml");
-  const specPath = path.join(testDir, "test.spec.ts");
-
-  if (!fs.existsSync(statePath) || !fs.existsSync(metadataPath) || !fs.existsSync(specPath)) {
-    return false;
-  }
-
-  try {
-    const state = JSON.parse(fs.readFileSync(statePath, "utf8")) as LocalState;
-    const expectedMetadata = YAML.stringify(toLocalMetadata(state.serverPayload));
-    const expectedSpec = generateSpec(state.serverPayload);
-    return (
-      fs.readFileSync(metadataPath, "utf8") !== expectedMetadata ||
-      fs.readFileSync(specPath, "utf8") !== expectedSpec
-    );
-  } catch {
-    return true;
-  }
-}
-
 export async function pullTests(): Promise<void> {
   const config = loadConfig();
   if (!config.application) throw new Error("application manquant dans cerberus.config.json");
 
   const outputDir = path.resolve(config.defaultBaseDir);
   fs.mkdirSync(outputDir, { recursive: true });
+  writeDslTypes(outputDir);
 
   console.log(`🔄 Récupération des tests depuis ${config.apiUrl}...`);
 
   const listRes = await fetch(`${config.apiUrl}/testcases/application/${config.application}`, {
     headers: {
       accept: "application/json",
-      "X-API-KEY": config.apiKey,
+      ...(await config.authHeaders()),
       "X-API-VERSION": config.apiVersion,
     },
   });
@@ -95,11 +75,11 @@ export async function pullTests(): Promise<void> {
   for (const test of json.data) {
     const testDir = path.join(outputDir, test.testFolderId, test.testcaseId);
     const detailRes = await fetch(
-      `${config.apiUrl}/testcases/${test.testFolderId}/${test.testcaseId}`,
+      `${config.apiUrl}/testcases/${encodeURIComponent(test.testFolderId)}/${encodeURIComponent(test.testcaseId)}`,
       {
         headers: {
           accept: "application/json",
-          "X-API-KEY": config.apiKey,
+          ...(await config.authHeaders()),
           "X-API-VERSION": config.apiVersion,
         },
       }
@@ -130,7 +110,7 @@ export async function pullTests(): Promise<void> {
       );
       fs.mkdirSync(path.dirname(conflictFile), { recursive: true });
       fs.writeFileSync(conflictFile, JSON.stringify(server, null, 2) + "\n", "utf8");
-      console.warn(`⚠️ Conflit serveur/local → ${conflictFile}`);
+      console.warn(`⚠️ Conflit serveur/local → ${conflictFile}\n   Fusionnez avec : merge ${test.testFolderId}/${test.testcaseId}`);
       conflicted++;
       continue;
     }
