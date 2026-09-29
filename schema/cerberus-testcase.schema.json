@@ -1,22 +1,82 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "title": "Cerberus TestCase Schema",
+  "title": "Cerberus Local Test Metadata",
   "type": "object",
   "properties": {
-    "testFolderId": { "type": "string", "readOnly": true },
-    "testcaseId": { "type": "string", "readOnly": true },
-    "application": { "type": "string", "readOnly": true },
-    "description": { "type": "string", "description": "Courte description du test" },
-    "priority": {
+    "formatVersion": {
       "type": "integer",
-      "enum": [1, 2, 3, 4, 5],
-      "description": "1=Bloquant, 5=Mineur"
+      "const": 1
+    },
+    "testFolder": {
+      "type": "string",
+      "description": "Cerberus test folder ID"
+    },
+    "testcase": {
+      "type": "string",
+      "description": "Cerberus testcase ID. If the server generates another ID during creation, the CLI adopts it locally."
+    },
+    "application": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "detailedDescription": {
+      "type": "string"
+    },
+    "priority": {
+      "type": [
+        "integer",
+        "string"
+      ],
+      "default": 1
     },
     "status": {
       "type": "string",
-      "enum": ["WORKING", "READY", "OBSOLETE"],
-      "description": "État fonctionnel du test"
+      "default": "WORKING"
+    },
+    "type": {
+      "type": "string",
+      "default": "AUTOMATED"
+    },
+    "active": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "boolean",
+          "default": true
+        },
+        "QA": {
+          "type": "boolean",
+          "default": true
+        },
+        "UAT": {
+          "type": "boolean",
+          "default": true
+        },
+        "PROD": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "conditionOperator": {
+      "type": "string",
+      "default": "always"
+    },
+    "properties": {
+      "type": "array",
+      "default": []
     }
   },
-  "required": ["testFolderId", "testcaseId", "application", "description"]
+  "required": [
+    "formatVersion",
+    "testFolder",
+    "testcase",
+    "application",
+    "description"
+  ],
+  "additionalProperties": true
 }
