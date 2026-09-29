@@ -12,7 +12,8 @@
     "pull": "npm run build && node ./dist/index.js pull",
     "push": "npm run build && node ./dist/index.js push",
     "prepublishOnly": "rm -rf dist && npm run build",
-    "validate": "npm run build && node ./dist/index.js validate"
+    "validate": "npm run build && node ./dist/index.js validate",
+    "prepare": "npm run build && node ./dist/index.js prepare"
   },
   "dependencies": {
     "commander": "^12.1.0",
@@ -23,7 +24,7 @@
     "ts-node": "^10.9.1",
     "@types/node": "^22.0.0"
   },
-  "description": "CLI Cerberus : synchronise les tests Cerberus (YAML) avec le d\u00e9p\u00f4t du d\u00e9veloppeur",
+  "description": "CLI Cerberus : synchronise les tests Cerberus (YAML) avec le dépôt du développeur",
   "files": [
     "dist",
     "schema",
