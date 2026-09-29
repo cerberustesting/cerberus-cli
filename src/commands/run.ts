@@ -32,7 +32,7 @@ function parseRef(arg: string): Ref {
 }
 
 /** Tous les testcases locaux d'un dossier.
- * Supporte le nouveau layout <folder>/<testcase>/header.yaml
+ * Supporte le layout natif <folder>/<testcase>/testcase.ts
  * et, pour compatibilité, l'ancien layout <folder>/<testcase>.yaml.
  */
 function refsFromFolder(config: CerberusConfig, folder: string): Ref[] {
@@ -47,8 +47,8 @@ function refsFromFolder(config: CerberusConfig, folder: string): Ref[] {
         if (entry.isDirectory()) {
             const testDir = path.join(dir, entry.name);
             migrateLegacyTestLayout(testDir);
-            const metadataPath = path.join(testDir, "header.yaml");
-            if (!fs.existsSync(metadataPath)) continue;
+            const testcasePath = path.join(testDir, "testcase.ts");
+            if (!fs.existsSync(testcasePath)) continue;
 
             const data = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
             refs.push({
