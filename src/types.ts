@@ -161,6 +161,7 @@ export interface TestCaseDetailed {
     dateModif?: string;
     steps?: TestCaseStep[];
     properties?: TestCaseProperty[];
+    countries?: TestCaseCountry[];
     labels?: TestCaseLabel[];
 }
 
