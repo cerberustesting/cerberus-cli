@@ -43,6 +43,26 @@ function initLocalGitRepo(baseDir: string): void {
   }
 }
 
+function existingTestDir(outputDir: string, testFolderId: string, testcaseId: string): string | undefined {
+  const folderDir = path.join(outputDir, testFolderId);
+  if (!fs.existsSync(folderDir)) return undefined;
+
+  for (const entry of fs.readdirSync(folderDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const metadataPath = path.join(folderDir, entry.name, "cerberus.yaml");
+    if (!fs.existsSync(metadataPath)) continue;
+    try {
+      const metadata = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
+      if (String(metadata.testcase ?? metadata.testcaseId ?? "") === String(testcaseId)) {
+        return path.join(folderDir, entry.name);
+      }
+    } catch {
+      // Ignore malformed local metadata here; pull will recreate a clean directory if needed.
+    }
+  }
+  return undefined;
+}
+
 export async function pullTests(): Promise<void> {
   const config = loadConfig();
   if (!config.application) throw new Error("application manquant dans cerberus.config.json");
@@ -74,7 +94,14 @@ export async function pullTests(): Promise<void> {
   let conflicted = 0;
 
   for (const test of json.data) {
-    const testDir = path.join(outputDir, test.testFolderId, localTestDirName(test));
+    const desiredTestDir = path.join(outputDir, test.testFolderId, localTestDirName(test));
+    const currentTestDir = existingTestDir(outputDir, test.testFolderId, test.testcaseId);
+    let testDir = currentTestDir ?? desiredTestDir;
+
+    if (currentTestDir && currentTestDir !== desiredTestDir && !fs.existsSync(desiredTestDir)) {
+      fs.renameSync(currentTestDir, desiredTestDir);
+      testDir = desiredTestDir;
+    }
     const detailRes = await fetch(
       `${config.apiUrl}/testcases/${encodeURIComponent(test.testFolderId)}/${encodeURIComponent(test.testcaseId)}`,
       {
