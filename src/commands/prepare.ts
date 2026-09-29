@@ -58,6 +58,17 @@ function isCerberusAction(call: ts.CallExpression): boolean {
   );
 }
 
+function isCerberusResourceAction(call: ts.CallExpression): boolean {
+  if (!ts.isPropertyAccessExpression(call.expression)) return false;
+  const receiver = call.expression.expression;
+  if (!ts.isCallExpression(receiver) || !ts.isPropertyAccessExpression(receiver.expression)) return false;
+  return (
+    ts.isIdentifier(receiver.expression.expression) &&
+    receiver.expression.expression.text === "cerberus" &&
+    ["object", "service"].includes(receiver.expression.name.text)
+  );
+}
+
 function isPageCall(call: ts.CallExpression): boolean {
   if (!ts.isPropertyAccessExpression(call.expression)) return false;
   const receiver = call.expression.expression;
@@ -142,7 +153,7 @@ function analyzeSpec(testDir: string): PrepareReport {
       if (isPageCall(node)) {
         playwrightActions++;
         if (!insideStep) actionsOutsideSteps++;
-      } else if (isCerberusAction(node)) {
+      } else if (isCerberusAction(node) || isCerberusResourceAction(node)) {
         cerberusActions++;
         if (!insideStep) actionsOutsideSteps++;
       }
