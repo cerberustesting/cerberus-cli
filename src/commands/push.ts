@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { loadConfig } from "../config.js";
+import { loadConfig, testsDir } from "../config.js";
 import { findLocalTestDirs, localTestDirName, readLocalTest, writeLocalTest } from "../dsl/local-format.js";
 import {
   backupServerState,
@@ -37,7 +37,7 @@ export interface PushOptions {
  */
 export async function pushCommand(refs: string[], opts: PushOptions): Promise<number> {
   const config = loadConfig();
-  const baseDir = config.defaultBaseDir;
+  const baseDir = testsDir(config);
 
   if (!fs.existsSync(baseDir)) {
     throw new Error(`Le dossier ${baseDir} n'existe pas. Lancez 'pull' d'abord.`);
