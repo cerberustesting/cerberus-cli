@@ -87,16 +87,29 @@ function renderMetadata(metadata: CerberusDslMetadata): string {
   return JSON.stringify(metadata);
 }
 
+function applicationObjectName(value: unknown): string | undefined {
+  const match = String(value ?? "").match(/^%object\.([^.]+)\.value%$/);
+  return match?.[1];
+}
+
 function playwrightExpression(action: TestAction): string | undefined {
   switch (action.action) {
     case "openUrl":
       return `page.goto(${literal(action.value1)})`;
 
-    case "type":
-      return `page.locator(${literal(action.value1)}).fill(${literal(action.value2)})`;
+    case "type": {
+      const objectName = applicationObjectName(action.value1);
+      return objectName
+        ? `cerberus.object(${literal(objectName)}).fill(${literal(action.value2)})`
+        : `page.locator(${literal(action.value1)}).fill(${literal(action.value2)})`;
+    }
 
-    case "click":
-      return `page.locator(${literal(action.value1)}).click()`;
+    case "click": {
+      const objectName = applicationObjectName(action.value1);
+      return objectName
+        ? `cerberus.object(${literal(objectName)}).click()`
+        : `page.locator(${literal(action.value1)}).click()`;
+    }
 
     case "wait": {
       const ms = Number(action.value1 ?? 0);
@@ -139,7 +152,17 @@ function renderAction(action: TestAction, indent = "        "): string[] {
   const metadata = actionMetadata(action);
   let lines: string[];
 
-  if (action.action === "calculateProperty") {
+  if (action.action === "callService") {
+    const opts: Record<string, unknown> = {};
+    if (hasText(action.value2)) opts.kafkaEvents = action.value2;
+    if (hasText(action.value3)) opts.kafkaWaitSeconds = action.value3;
+    const expression = Object.keys(opts).length
+      ? `cerberus.service(${literal(action.value1)}).call(${JSON.stringify(opts)})`
+      : `cerberus.service(${literal(action.value1)}).call()`;
+    lines = hasMetadata(metadata)
+      ? [`${indent}await cerberus.do(${expression}, ${renderMetadata(metadata)});`]
+      : [`${indent}await ${expression};`];
+  } else if (action.action === "calculateProperty") {
     const expression = `cerberus.calculateProperty(${literal(action.value1)})`;
     lines = hasMetadata(metadata)
       ? [`${indent}await cerberus.do(${expression}, ${renderMetadata(metadata)});`]
@@ -357,6 +380,25 @@ function locatorValue(call: ts.CallExpression): string | undefined {
   return stringArg(receiver, 0);
 }
 
+function cerberusObjectValue(call: ts.CallExpression): string | undefined {
+  if (!ts.isPropertyAccessExpression(call.expression)) return undefined;
+  const receiver = call.expression.expression;
+  if (!ts.isCallExpression(receiver) || !ts.isPropertyAccessExpression(receiver.expression)) return undefined;
+  if (!ts.isIdentifier(receiver.expression.expression) || receiver.expression.expression.text !== "cerberus") return undefined;
+  if (receiver.expression.name.text !== "object") return undefined;
+  const name = stringArg(receiver, 0);
+  return name ? `%object.${name}.value%` : undefined;
+}
+
+function cerberusServiceName(call: ts.CallExpression): string | undefined {
+  if (!ts.isPropertyAccessExpression(call.expression) || call.expression.name.text !== "call") return undefined;
+  const receiver = call.expression.expression;
+  if (!ts.isCallExpression(receiver) || !ts.isPropertyAccessExpression(receiver.expression)) return undefined;
+  if (!ts.isIdentifier(receiver.expression.expression) || receiver.expression.expression.text !== "cerberus") return undefined;
+  if (receiver.expression.name.text !== "service") return undefined;
+  return stringArg(receiver, 0);
+}
+
 function parseMappedCall(
   call: ts.CallExpression,
   source: ts.SourceFile,
@@ -400,6 +442,33 @@ function parseMappedCall(
         value1: fn.body.statements.map((statement) => statement.getText(source)).join("\n"),
       };
     }
+  }
+
+  const objectValue = cerberusObjectValue(call);
+  if (objectValue !== undefined) {
+    if (method === "fill") {
+      const value = stringArg(call, 0);
+      if (value === undefined) {
+        issues.push({ file: source.fileName, line: sourceLine(source, call), message: "cerberus.object(...).fill() requires a literal value." });
+        return undefined;
+      }
+      return { ...base, action: "type", value1: objectValue, value2: value };
+    }
+    if (method === "click") {
+      return { ...base, action: "click", value1: objectValue };
+    }
+  }
+
+  const serviceName = cerberusServiceName(call);
+  if (serviceName !== undefined) {
+    const opts = parseObjectExpression(call.arguments[0]);
+    return {
+      ...base,
+      action: "callService",
+      value1: serviceName,
+      value2: opts.kafkaEvents !== undefined ? String(opts.kafkaEvents) : "",
+      value3: opts.kafkaWaitSeconds !== undefined ? String(opts.kafkaWaitSeconds) : "",
+    };
   }
 
   const locator = locatorValue(call);
@@ -902,9 +971,12 @@ export function parseSpec(
           ts.isCallExpression(receiver) &&
           ts.isPropertyAccessExpression(receiver.expression) &&
           ts.isIdentifier(receiver.expression.expression) &&
-          receiver.expression.expression.text === "page"
+          ["page", "cerberus"].includes(receiver.expression.expression.text)
         ) {
-          isDslAction = true;
+          const builder = receiver.expression.name.text;
+          isDslAction =
+            receiver.expression.expression.text === "page" ||
+            ["object", "service"].includes(builder);
         }
       }
 
