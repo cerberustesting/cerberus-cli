@@ -128,6 +128,10 @@ interface CerberusPropertyBuilder {
     retryPeriod(milliseconds: number): CerberusPropertyBuilder;
     cacheExpire(seconds: number): CerberusPropertyBuilder;
     description(value: string): CerberusPropertyBuilder;
+    /** Scope la définition à un pays du testcase. */
+    country(value: string): CerberusPropertyBuilder;
+    /** Scope la même définition à plusieurs pays du testcase. */
+    countries(...values: string[]): CerberusPropertyBuilder;
 }
 
 interface CerberusPropertyFactory {
