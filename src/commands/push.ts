@@ -132,8 +132,9 @@ export async function pushCommand(refs: string[], opts: PushOptions): Promise<nu
         continue;
       }
 
+      const serverManagedCountries = !Array.isArray((data as any).countries) || (data as any).countries.length === 0;
       const problems = verifyPush(data, afterCreate).filter(
-        (problem) => !problem.startsWith("testcaseId")
+        (problem) => !(serverManagedCountries && problem.startsWith("pays :"))
       );
       if (problems.length > 0) {
         console.error(`❌ ${label} : testcase créé mais contenu différent de ce qui était attendu`);
