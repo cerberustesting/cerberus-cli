@@ -234,15 +234,43 @@ export function writeState(testDir: string, serverPayload: TestCaseDetailed): vo
     fs.writeFileSync(path.join(testDir, ".cerberus", "state.json"), JSON.stringify(state, null, 2) + "\n", "utf8");
 }
 
-/** Sélectionne les dossiers de tests : références « Dossier/Id » ou tous. */
+/** Sélectionne les dossiers de tests : accepte le nom de dossier lisible ou la référence technique « Dossier/Id ». */
 export function selectTestDirs(allDirs: string[], refs: string[]): string[] {
     if (refs.length === 0) return allDirs;
     const wanted = refs.map((r) => r.replace(/\/+$/, ""));
     const result: string[] = [];
+
     for (const ref of wanted) {
-        const dir = allDirs.find((d) => d.split(path.sep).slice(-2).join("/") === ref);
-        if (!dir) throw new Error(`Test local introuvable : ${ref} (attendu : <dossier>/<testcaseId>)`);
-        result.push(dir);
+        const byPath = allDirs.find((d) => d.split(path.sep).slice(-2).join("/") === ref);
+        if (byPath) {
+            result.push(byPath);
+            continue;
+        }
+
+        const [wantedFolder, wantedTestcase, ...rest] = ref.split("/");
+        if (!wantedFolder || !wantedTestcase || rest.length) {
+            throw new Error(`Référence invalide : ${ref} (attendu : <dossier>/<testcaseId>)`);
+        }
+
+        const byMetadata = allDirs.find((d) => {
+            const metadataPath = path.join(d, "cerberus.yaml");
+            if (!fs.existsSync(metadataPath)) return false;
+            try {
+                const metadata = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
+                return (
+                    String(metadata.testFolder ?? metadata.testFolderId ?? "") === wantedFolder &&
+                    String(metadata.testcase ?? metadata.testcaseId ?? "") === wantedTestcase
+                );
+            } catch {
+                return false;
+            }
+        });
+
+        if (!byMetadata) {
+            throw new Error(`Test local introuvable : ${ref} (attendu : <dossier>/<testcaseId>)`);
+        }
+        result.push(byMetadata);
     }
+
     return result;
 }
