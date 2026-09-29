@@ -49,7 +49,7 @@ export function isLocallyModified(testDir: string): boolean {
     const specPath = path.join(testDir, "test.spec.ts");
     if (!fs.existsSync(metadataPath) || !fs.existsSync(specPath)) return false;
     const state = readState(testDir);
-    if (!state) return false;
+    if (!state) return fs.existsSync(metadataPath) && fs.existsSync(specPath);
     try {
         return (
             fs.readFileSync(metadataPath, "utf8") !== YAML.stringify(toLocalMetadata(state.serverPayload)) ||
@@ -128,6 +128,21 @@ export async function putServerTest(config: CerberusConfig, test: TestCaseDetail
         }),
     });
 }
+
+export async function createServerTest(config: CerberusConfig, test: TestCaseDetailed): Promise<Response> {
+    return fetch(`${config.apiUrl}/testcases`, {
+        method: "POST",
+        redirect: "manual",
+        headers: await baseHeaders(config, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+            ...test,
+            version: Number(test.version ?? 0),
+            bugs: (test as any).bugs ?? [],
+            conditionOptions: (test as any).conditionOptions ?? [],
+        }),
+    });
+}
+
 
 // ---------------------------------------------------------------- résumé et vérification
 
