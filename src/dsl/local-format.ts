@@ -63,7 +63,7 @@ function actionMetadata(action: TestAction): CerberusDslMetadata {
   if (hasText(action.conditionOperator) && action.conditionOperator !== "always") {
     metadata.condition = action.conditionOperator;
   }
-  if (!isTrue(action.isFatal)) metadata.fatal = false;
+  if (action.isFatal !== undefined && !isTrue(action.isFatal)) metadata.fatal = false;
 
   const before = isTrue(action.doScreenshotBefore);
   const after = isTrue(action.doScreenshotAfter);
@@ -71,8 +71,10 @@ function actionMetadata(action: TestAction): CerberusDslMetadata {
   else if (before) metadata.screenshot = "before";
   else if (after) metadata.screenshot = "after";
 
-  if (Number(action.waitBefore) !== 0) metadata.waitBefore = Number(action.waitBefore);
-  if (Number(action.waitAfter) !== 0) metadata.waitAfter = Number(action.waitAfter);
+  const waitBefore = Number(action.waitBefore);
+  const waitAfter = Number(action.waitAfter);
+  if (Number.isFinite(waitBefore) && waitBefore !== 0) metadata.waitBefore = waitBefore;
+  if (Number.isFinite(waitAfter) && waitAfter !== 0) metadata.waitAfter = waitAfter;
 
   return metadata;
 }
