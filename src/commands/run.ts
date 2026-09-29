@@ -32,7 +32,7 @@ function parseRef(arg: string): Ref {
 }
 
 /** Tous les testcases locaux d'un dossier.
- * Supporte le nouveau layout <folder>/<testcase>/cerberus.yaml
+ * Supporte le nouveau layout <folder>/<testcase>/header.yaml
  * et, pour compatibilité, l'ancien layout <folder>/<testcase>.yaml.
  */
 function refsFromFolder(config: CerberusConfig, folder: string): Ref[] {
@@ -45,7 +45,7 @@ function refsFromFolder(config: CerberusConfig, folder: string): Ref[] {
         if (entry.name.startsWith(".")) continue;
 
         if (entry.isDirectory()) {
-            const metadataPath = path.join(dir, entry.name, "cerberus.yaml");
+            const metadataPath = path.join(dir, entry.name, "header.yaml");
             if (!fs.existsSync(metadataPath)) continue;
 
             const data = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
