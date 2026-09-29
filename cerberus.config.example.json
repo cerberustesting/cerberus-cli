@@ -1,7 +1,7 @@
 {
   "apiUrl": "https://qa.cerberus-testing.com/api/public",
   "apiVersion": "1",
-  "defaultBaseDir": "./tests",
+  "defaultBaseDir": "./cerberus",
   "application": "MyApplication",
   "country": "FR",
   "environment": "QA"
