@@ -19,17 +19,62 @@ interface CerberusActionOptions {
     description?: string;
 }
 
+interface CerberusLocator {
+    click(): Promise<void>;
+    fill(value: string): Promise<void>;
+}
+
 interface CerberusPage {
     /** Action Cerberus openUrl. L'URL doit être un littéral. */
     goto(url: string): Promise<void>;
+    /** Sélecteur Playwright-like. */
+    locator(selector: string): CerberusLocator;
     /** Action Cerberus wait. La durée doit être un littéral (ms). */
     waitForTimeout(ms: number): Promise<void>;
     /** Action Cerberus executeJS. Le corps de la fonction est envoyé tel quel au navigateur. */
     evaluate(fn: () => unknown): Promise<void>;
 }
 
+interface CerberusRequestOptions {
+    data?: unknown;
+    headers?: Record<string, string>;
+    params?: Record<string, string | number | boolean>;
+    timeout?: number;
+    failOnStatusCode?: boolean;
+}
+
+interface CerberusApiResponse {
+    ok(): boolean;
+    status(): number;
+    text(): Promise<string>;
+    json(): Promise<unknown>;
+}
+
+interface CerberusRequest {
+    /**
+     * Vocabulaire réservé à l'API Playwright request.*.
+     * Ces appels ne sont convertis vers Cerberus que lorsqu'un mapping sémantiquement équivalent existe.
+     */
+    get(url: string, options?: CerberusRequestOptions): Promise<CerberusApiResponse>;
+    post(url: string, options?: CerberusRequestOptions): Promise<CerberusApiResponse>;
+    put(url: string, options?: CerberusRequestOptions): Promise<CerberusApiResponse>;
+    patch(url: string, options?: CerberusRequestOptions): Promise<CerberusApiResponse>;
+    delete(url: string, options?: CerberusRequestOptions): Promise<CerberusApiResponse>;
+}
+
+interface CerberusMetadata {
+    description?: string;
+    condition?: string;
+    fatal?: boolean;
+    screenshot?: "before" | "after" | "both" | "never";
+    waitBefore?: number;
+    waitAfter?: number;
+}
+
 interface Cerberus {
     step(description: string, body: () => Promise<void>): Promise<void>;
+    /** Enrichit une action Playwright-like avec les métadonnées d'exécution Cerberus. */
+    do<T>(action: Promise<T>, metadata?: CerberusMetadata): Promise<T>;
     /** Action Cerberus non mappée sur page.*. */
     action(name: string, options?: CerberusActionOptions): Promise<void>;
     /** Contrôle Cerberus : doit suivre une action. */
@@ -39,7 +84,7 @@ interface Cerberus {
 
 declare function test(
     name: string,
-    body: (fixtures: { page: CerberusPage; cerberus: Cerberus }) => Promise<void>
+    body: (fixtures: { page: CerberusPage; request: CerberusRequest; cerberus: Cerberus }) => Promise<void>
 ): void;
 
 // Le code d'action executeJS de Cerberus installe ces propriétés sur la console du navigateur.
