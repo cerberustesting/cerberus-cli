@@ -1,28 +1,15 @@
 import fs from "fs";
 import path from "path";
 import ts from "typescript";
-import YAML from "yaml";
-import type { TestAction, TestCaseDetailed, TestCaseStep, TestControl } from "../types.js";
-
-export interface LocalMetadata {
-  formatVersion: 1;
-  testFolder: string;
-  testcase: string;
-  application: string;
-  description: string;
-  detailedDescription?: string;
-  priority: number | string;
-  status: string;
-  type: string;
-  active: {
-    default: boolean;
-    QA: boolean;
-    UAT: boolean;
-    PROD: boolean;
-  };
-  conditionOperator?: string;
-  properties?: unknown[];
-}
+import type {
+  TestAction,
+  TestCaseCountry,
+  TestCaseDetailed,
+  TestCaseLabel,
+  TestCaseProperty,
+  TestCaseStep,
+  TestControl,
+} from "../types.js";
 
 export interface LocalState {
   formatVersion: 1;
@@ -35,211 +22,12 @@ export interface ValidationIssue {
   message: string;
 }
 
-type CerberusDslMetadata = {
-  description?: string;
-  condition?: string;
-  fatal?: boolean;
-  screenshot?: "before" | "after" | "both" | "never";
-  waitBefore?: number;
-  waitAfter?: number;
+type Chain = {
+  namespace: string;
+  method: string;
+  args: ts.NodeArray<ts.Expression>;
+  modifiers: Array<{ method: string; args: ts.NodeArray<ts.Expression> }>;
 };
-
-function literal(value: unknown): string {
-  return JSON.stringify(value ?? "");
-}
-
-function isTrue(value: boolean | "Y" | "N" | undefined): boolean {
-  return value === true || value === "Y";
-}
-
-function hasText(value: unknown): boolean {
-  return value !== undefined && value !== null && String(value) !== "";
-}
-
-function actionMetadata(action: TestAction): CerberusDslMetadata {
-  const metadata: CerberusDslMetadata = {};
-
-  if (hasText(action.description)) metadata.description = action.description;
-  if (hasText(action.conditionOperator) && action.conditionOperator !== "always") {
-    metadata.condition = action.conditionOperator;
-  }
-  if (action.isFatal !== undefined && !isTrue(action.isFatal)) metadata.fatal = false;
-
-  const before = isTrue(action.doScreenshotBefore);
-  const after = isTrue(action.doScreenshotAfter);
-  if (before && after) metadata.screenshot = "both";
-  else if (before) metadata.screenshot = "before";
-  else if (after) metadata.screenshot = "after";
-
-  const waitBefore = Number(action.waitBefore);
-  const waitAfter = Number(action.waitAfter);
-  if (Number.isFinite(waitBefore) && waitBefore !== 0) metadata.waitBefore = waitBefore;
-  if (Number.isFinite(waitAfter) && waitAfter !== 0) metadata.waitAfter = waitAfter;
-
-  return metadata;
-}
-
-function hasMetadata(metadata: CerberusDslMetadata): boolean {
-  return Object.keys(metadata).length > 0;
-}
-
-function renderMetadata(metadata: CerberusDslMetadata): string {
-  return JSON.stringify(metadata);
-}
-
-function applicationObjectName(value: unknown): string | undefined {
-  const match = String(value ?? "").match(/^%object\.([^.]+)\.value%$/);
-  return match?.[1];
-}
-
-function datalibExpression(value: unknown): string | undefined {
-  const match = String(value ?? "").match(/^%datalib\.([^.]+)\.([^.]+)%$/);
-  return match ? `cerberus.datalib(${literal(match[1])}).value(${literal(match[2])})` : undefined;
-}
-
-function playwrightExpression(action: TestAction): string | undefined {
-  switch (action.action) {
-    case "openUrl":
-      return `page.goto(${literal(action.value1)})`;
-
-    case "type": {
-      const objectName = applicationObjectName(action.value1);
-      const value = renderDslValue(action.value2);
-      return objectName
-        ? `cerberus.object(${literal(objectName)}).fill(${value})`
-        : `page.locator(${literal(action.value1)}).fill(${value})`;
-    }
-
-    case "click": {
-      const objectName = applicationObjectName(action.value1);
-      return objectName
-        ? `cerberus.object(${literal(objectName)}).click()`
-        : `page.locator(${literal(action.value1)}).click()`;
-    }
-
-    case "wait": {
-      const ms = Number(action.value1 ?? 0);
-      return `page.waitForTimeout(${Number.isFinite(ms) ? ms : literal(action.value1)})`;
-    }
-
-    default:
-      return undefined;
-  }
-}
-
-function renderExecuteJs(action: TestAction, indent: string, metadata: CerberusDslMetadata): string[] {
-  const lines: string[] = [];
-  const wrapped = hasMetadata(metadata);
-
-  if (wrapped) {
-    lines.push(`${indent}await cerberus.do(`);
-    lines.push(`${indent}    page.evaluate(() => {`);
-  } else {
-    lines.push(`${indent}await page.evaluate(() => {`);
-  }
-
-  const bodyIndent = wrapped ? indent + "        " : indent + "    ";
-  for (const line of String(action.value1 ?? "").split(/\r?\n/)) {
-    lines.push(bodyIndent + line);
-  }
-
-  if (wrapped) {
-    lines.push(`${indent}    }),`);
-    lines.push(`${indent}    ${renderMetadata(metadata)}`);
-    lines.push(`${indent});`);
-  } else {
-    lines.push(`${indent}});`);
-  }
-
-  return lines;
-}
-
-function renderAction(action: TestAction, indent = "        "): string[] {
-  const metadata = actionMetadata(action);
-  let lines: string[];
-
-  if (action.action === "callService") {
-    const opts: Record<string, unknown> = {};
-    if (hasText(action.value2)) opts.kafkaEvents = action.value2;
-    if (hasText(action.value3)) opts.kafkaWaitSeconds = action.value3;
-    const expression = Object.keys(opts).length
-      ? `cerberus.service(${literal(action.value1)}).call(${JSON.stringify(opts)})`
-      : `cerberus.service(${literal(action.value1)}).call()`;
-    lines = hasMetadata(metadata)
-      ? [`${indent}await cerberus.do(${expression}, ${renderMetadata(metadata)});`]
-      : [`${indent}await ${expression};`];
-  } else if (action.action === "calculateProperty") {
-    const expression = `cerberus.calculateProperty(${literal(action.value1)})`;
-    lines = hasMetadata(metadata)
-      ? [`${indent}await cerberus.do(${expression}, ${renderMetadata(metadata)});`]
-      : [`${indent}await ${expression};`];
-  } else if (action.action === "executeJS") {
-    lines = renderExecuteJs(action, indent, metadata);
-  } else {
-    const expression = playwrightExpression(action);
-
-    if (expression) {
-      lines = hasMetadata(metadata)
-        ? [`${indent}await cerberus.do(${expression}, ${renderMetadata(metadata)});`]
-        : [`${indent}await ${expression};`];
-    } else {
-      const options: string[] = [];
-      if (action.value1 !== undefined) options.push(`value1: ${renderDslValue(action.value1)}`);
-      if (action.value2 !== undefined) options.push(`value2: ${renderDslValue(action.value2)}`);
-      if (action.value3 !== undefined) options.push(`value3: ${renderDslValue(action.value3)}`);
-      if (action.conditionOperator !== undefined) options.push(`conditionOperator: ${literal(action.conditionOperator)}`);
-      if (action.isFatal !== undefined) options.push(`isFatal: ${literal(action.isFatal)}`);
-      if (action.doScreenshotBefore !== undefined) options.push(`doScreenshotBefore: ${literal(action.doScreenshotBefore)}`);
-      if (action.doScreenshotAfter !== undefined) options.push(`doScreenshotAfter: ${literal(action.doScreenshotAfter)}`);
-      if (action.waitBefore !== undefined) options.push(`waitBefore: ${literal(action.waitBefore)}`);
-      if (action.waitAfter !== undefined) options.push(`waitAfter: ${literal(action.waitAfter)}`);
-      if (action.description !== undefined) options.push(`description: ${literal(action.description)}`);
-      lines = [
-        `${indent}await cerberus.action(${literal(action.action)}, { ${options.join(", ")} });`,
-      ];
-    }
-  }
-
-  for (const control of action.controls ?? []) {
-    lines.push(
-      `${indent}await cerberus.control(${literal(control.control)}, ${JSON.stringify({
-        value1: control.value1,
-        value2: control.value2,
-        value3: control.value3,
-        conditionOperator: control.conditionOperator,
-        isFatal: control.isFatal,
-        doScreenshotBefore: control.doScreenshotBefore,
-        doScreenshotAfter: control.doScreenshotAfter,
-        waitBefore: control.waitBefore,
-        waitAfter: control.waitAfter,
-        description: control.description,
-      })});`
-    );
-  }
-
-  return lines;
-}
-
-export function toLocalMetadata(test: TestCaseDetailed): LocalMetadata {
-  return {
-    formatVersion: 1,
-    testFolder: test.testFolderId,
-    testcase: test.testcaseId,
-    application: test.application,
-    description: test.description,
-    detailedDescription: test.detailedDescription,
-    priority: test.priority,
-    status: test.status,
-    type: test.type,
-    active: {
-      default: test.isActive,
-      QA: test.isActiveQA,
-      UAT: test.isActiveUAT,
-      PROD: test.isActivePROD,
-    },
-    conditionOperator: test.conditionOperator,
-  };
-}
 
 const PROPERTY_FACTORY_BY_TYPE: Record<string, string> = {
   text: "text",
@@ -267,15 +55,200 @@ const PROPERTY_TYPE_BY_FACTORY = Object.fromEntries(
   Object.entries(PROPERTY_FACTORY_BY_TYPE).map(([type, factory]) => [factory, type])
 ) as Record<string, string>;
 
-function normalizedNature(value: unknown): string | undefined {
-  if (!hasText(value)) return undefined;
-  const nature = String(value).toUpperCase();
-  return nature === "NOTINUSE" ? "NOTINUSE" : nature;
+function literal(value: unknown): string {
+  return JSON.stringify(value ?? "");
 }
 
-function renderPropertyDefinition(property: NonNullable<TestCaseDetailed["properties"]>[number]): string {
+function hasText(value: unknown): boolean {
+  return value !== undefined && value !== null && String(value) !== "";
+}
+
+function isTrue(value: boolean | "Y" | "N" | undefined): boolean {
+  return value === true || value === "Y";
+}
+
+function sourceLine(source: ts.SourceFile, node: ts.Node): number {
+  return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+}
+
+function parseLiteral(value: ts.Expression | undefined): unknown {
+  if (!value) return undefined;
+  if (ts.isStringLiteralLike(value) || ts.isNoSubstitutionTemplateLiteral(value)) return value.text;
+  if (ts.isNumericLiteral(value)) return Number(value.text);
+  if (value.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (value.kind === ts.SyntaxKind.FalseKeyword) return false;
+  if (value.kind === ts.SyntaxKind.NullKeyword) return null;
+  if (ts.isPrefixUnaryExpression(value) && value.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(value.operand)) {
+    return -Number(value.operand.text);
+  }
+  if (ts.isArrayLiteralExpression(value)) {
+    const values = value.elements.map((item) => parseLiteral(item as ts.Expression));
+    return values.every((item) => item !== undefined) ? values : undefined;
+  }
+  return undefined;
+}
+
+function propertyName(name: ts.PropertyName): string | undefined {
+  return ts.isIdentifier(name) || ts.isStringLiteralLike(name) ? name.text : undefined;
+}
+
+function findProperty(obj: ts.ObjectLiteralExpression, name: string): ts.PropertyAssignment | undefined {
+  return obj.properties.find(
+    (prop): prop is ts.PropertyAssignment =>
+      ts.isPropertyAssignment(prop) && propertyName(prop.name) === name
+  );
+}
+
+function decomposeChain(expression: ts.Expression): Chain | undefined {
+  const modifiers: Array<{ method: string; args: ts.NodeArray<ts.Expression> }> = [];
+  let current = expression;
+
+  while (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
+    const receiver = current.expression.expression;
+    const method = current.expression.name.text;
+
+    if (ts.isIdentifier(receiver)) {
+      return { namespace: receiver.text, method, args: current.arguments, modifiers: modifiers.reverse() };
+    }
+
+    modifiers.push({ method, args: current.arguments });
+    if (!ts.isCallExpression(receiver)) return undefined;
+    current = receiver;
+  }
+
+  return undefined;
+}
+
+function parseObjectRef(expression: ts.Expression | undefined): string | undefined {
+  if (!expression || !ts.isCallExpression(expression) || !ts.isIdentifier(expression.expression)) return undefined;
+  if (expression.expression.text !== "object") return undefined;
+  const value = parseLiteral(expression.arguments[0]);
+  return typeof value === "string" && value ? `%object.${value}.value%` : undefined;
+}
+
+function parsePropertyRef(expression: ts.Expression | undefined): string | undefined {
+  if (!expression || !ts.isCallExpression(expression) || !ts.isPropertyAccessExpression(expression.expression)) return undefined;
+  if (!ts.isIdentifier(expression.expression.expression) || expression.expression.expression.text !== "property") return undefined;
+  if (expression.expression.name.text !== "value") return undefined;
+  const value = parseLiteral(expression.arguments[0]);
+  return typeof value === "string" && value ? `%property.${value}%` : undefined;
+}
+
+function parseDataLibRef(expression: ts.Expression | undefined): string | undefined {
+  if (!expression || !ts.isCallExpression(expression) || !ts.isPropertyAccessExpression(expression.expression)) return undefined;
+  if (!ts.isIdentifier(expression.expression.expression) || expression.expression.expression.text !== "datalib") return undefined;
+  if (expression.expression.name.text !== "value") return undefined;
+  const name = parseLiteral(expression.arguments[0]);
+  const subData = parseLiteral(expression.arguments[1]);
+  return typeof name === "string" && typeof subData === "string"
+    ? `%datalib.${name}.${subData}%`
+    : undefined;
+}
+
+function parseDslValue(expression: ts.Expression | undefined): string | undefined {
+  const ref = parseObjectRef(expression) ?? parsePropertyRef(expression) ?? parseDataLibRef(expression);
+  if (ref !== undefined) return ref;
+  const value = parseLiteral(expression);
+  return value === undefined ? undefined : String(value);
+}
+
+function renderDslValue(value: unknown): string {
+  const text = String(value ?? "");
+  const property = text.match(/^%property\.([^.]+)%$/);
+  if (property) return `property.value(${literal(property[1])})`;
+
+  const datalib = text.match(/^%datalib\.([^.]+)\.([^.]+)%$/);
+  if (datalib) return `datalib.value(${literal(datalib[1])}, ${literal(datalib[2])})`;
+
+  const object = text.match(/^%object\.([^.]+)\.value%$/);
+  if (object) return `object(${literal(object[1])})`;
+
+  return literal(value);
+}
+
+function renderActionModifiers(action: TestAction | TestControl): string {
+  let out = "";
+  if (hasText(action.description)) out += `.description(${literal(action.description)})`;
+  if (hasText(action.conditionOperator) && action.conditionOperator !== "always") {
+    out += `.condition(${literal(action.conditionOperator)})`;
+  }
+  if (action.isFatal !== undefined && !isTrue(action.isFatal)) out += ".fatal(false)";
+
+  const before = isTrue(action.doScreenshotBefore);
+  const after = isTrue(action.doScreenshotAfter);
+  if (before && after) out += '.screenshot("both")';
+  else if (before) out += '.screenshot("before")';
+  else if (after) out += '.screenshot("after")';
+
+  if (Number(action.waitBefore ?? 0) !== 0) out += `.waitBefore(${Number(action.waitBefore)})`;
+  if (Number(action.waitAfter ?? 0) !== 0) out += `.waitAfter(${Number(action.waitAfter)})`;
+  return out;
+}
+
+function actionBaseExpression(action: TestAction): string {
+  switch (action.action) {
+    case "openUrl":
+      return `action.openUrl(${renderDslValue(action.value1)})`;
+    case "type":
+      return `action.feedField(${renderDslValue(action.value1)}, ${renderDslValue(action.value2)})`;
+    case "click":
+      return `action.click(${renderDslValue(action.value1)})`;
+    case "wait":
+      return `action.wait(${Number.isFinite(Number(action.value1)) ? Number(action.value1) : renderDslValue(action.value1)})`;
+    case "executeJS":
+      return `action.executeJS(${literal(action.value1)})`;
+    case "calculateProperty":
+      return `action.calculateProperty(${literal(action.value1)})`;
+    case "callService": {
+      const args = [literal(action.value1)];
+      if (hasText(action.value2) || hasText(action.value3)) {
+        args.push(JSON.stringify({
+          ...(hasText(action.value2) ? { kafkaEvents: action.value2 } : {}),
+          ...(hasText(action.value3) ? { kafkaWaitSeconds: action.value3 } : {}),
+        }));
+      }
+      return `action.callService(${args.join(", ")})`;
+    }
+    default: {
+      const values: string[] = [];
+      if (hasText(action.value1)) values.push(`value1: ${renderDslValue(action.value1)}`);
+      if (hasText(action.value2)) values.push(`value2: ${renderDslValue(action.value2)}`);
+      if (hasText(action.value3)) values.push(`value3: ${renderDslValue(action.value3)}`);
+      return `action.custom(${literal(action.action)}, { ${values.join(", ")} })`;
+    }
+  }
+}
+
+function renderAction(action: TestAction, indent = "      "): string[] {
+  const lines = [`${indent}${actionBaseExpression(action)}${renderActionModifiers(action)};`];
+
+  for (const control of action.controls ?? []) {
+    const args = [control.value1, control.value2, control.value3]
+      .map((v) => hasText(v) ? renderDslValue(v) : undefined);
+    while (args.length && args[args.length - 1] === undefined) args.pop();
+
+    const identifier = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(control.control);
+    const base = identifier
+      ? `control.${control.control}(${args.filter((x): x is string => x !== undefined).join(", ")})`
+      : `control.custom(${literal(control.control)}, { ${["value1", "value2", "value3"]
+          .map((key, i) => args[i] !== undefined ? `${key}: ${args[i]}` : "")
+          .filter(Boolean)
+          .join(", ")} })`;
+    lines.push(`${indent}${base}${renderActionModifiers(control)};`);
+  }
+
+  return lines;
+}
+
+function normalizedNature(value: unknown): string | undefined {
+  if (!hasText(value)) return undefined;
+  return String(value).toUpperCase();
+}
+
+function renderPropertyDefinition(property: TestCaseProperty): string {
   const type = String(property.type ?? "text");
   const factory = PROPERTY_FACTORY_BY_TYPE[type];
+
   if (!factory) {
     const detail: Record<string, unknown> = { type };
     for (const key of ["value1", "value2", "value3", "database", "length", "rowLimit", "nature", "rank", "retryNb", "retryPeriod", "cacheExpire", "description"] as const) {
@@ -285,11 +258,8 @@ function renderPropertyDefinition(property: NonNullable<TestCaseDetailed["proper
     return JSON.stringify(detail);
   }
 
-  const args =
-    type === "text"
-      ? (hasText(property.value1) ? literal(property.value1) : "")
-      : (hasText(property.value1) ? literal(property.value1) : "");
-  let expression = `property.${factory}(${args})`;
+  const first = hasText(property.value1) ? literal(property.value1) : "";
+  let expression = `property.${factory}(${first})`;
 
   const modifiers: Array<[string, unknown]> = [
     ["value2", property.value2],
@@ -309,90 +279,91 @@ function renderPropertyDefinition(property: NonNullable<TestCaseDetailed["proper
     if (value === undefined || value === null || String(value) === "") continue;
     if (["rowLimit", "rank", "retryNb", "retryPeriod", "cacheExpire"].includes(method) && Number(value) === 0) continue;
     if (method === "nature" && String(value).toUpperCase() === "STATIC") continue;
-    const rendered =
-      method === "length" && /^-?\d+$/.test(String(value))
-        ? String(Number(value))
-        : literal(value);
+    const rendered = method === "length" && /^-?\d+$/.test(String(value)) ? String(Number(value)) : literal(value);
     expression += `.${method}(${rendered})`;
   }
 
-  const countries = (property.countries ?? [])
-    .map((country) => String(country.value ?? "").trim())
-    .filter(Boolean);
-  if (countries.length === 1) {
-    expression += `.country(${literal(countries[0])})`;
-  } else if (countries.length > 1) {
-    expression += `.countries(${countries.map((country) => literal(country)).join(", ")})`;
-  }
+  const countries = (property.countries ?? []).map((country) => country.value).filter(Boolean);
+  if (countries.length === 1) expression += `.country(${literal(countries[0])})`;
+  else if (countries.length > 1) expression += `.countries(${countries.map(literal).join(", ")})`;
 
   return expression;
 }
 
-function renderProperties(test: TestCaseDetailed): string[] {
+function renderProperties(test: TestCaseDetailed, indent = "    "): string[] {
   const properties = test.properties ?? [];
   if (!properties.length) return [];
 
-  const lines = ["    cerberus.properties({"];
+  const lines = [`${indent}property.define({`];
   properties.forEach((property, index) => {
-    const comma = index < properties.length - 1 ? "," : "";
-    lines.push(`        ${JSON.stringify(property.property)}: ${renderPropertyDefinition(property)}${comma}`);
+    lines.push(
+      `${indent}  ${JSON.stringify(property.property)}: ${renderPropertyDefinition(property)}${index < properties.length - 1 ? "," : ""}`
+    );
   });
-  lines.push("    });", "");
+  lines.push(`${indent}});`, "");
   return lines;
 }
 
-function propertyExpression(value: unknown): string | undefined {
-  const match = String(value ?? "").match(/^%property\.([^.]+)%$/);
-  return match ? `cerberus.property(${literal(match[1])})` : undefined;
-}
-
-function renderDslValue(value: unknown): string {
-  return propertyExpression(value) ?? datalibExpression(value) ?? literal(value);
+function activeList(test: TestCaseDetailed): string[] {
+  const values: string[] = [];
+  if (test.isActiveQA) values.push("QA");
+  if (test.isActiveUAT) values.push("UAT");
+  if (test.isActivePROD) values.push("PROD");
+  return values;
 }
 
 export function generateSpec(test: TestCaseDetailed): string {
-  const tags = [...new Set((test.labels ?? [])
-    .map((label) => String(label.label ?? "").trim())
-    .filter(Boolean)
-    .map((label) => label.startsWith("@") ? label : `@${label}`))];
+  const labels = [...new Set((test.labels ?? []).map((label) => label.label).filter(Boolean))];
+  const countries = [...new Set(((test as TestCaseDetailed & { countries?: TestCaseCountry[] }).countries ?? []).map((c) => c.value).filter(Boolean))];
 
-  const options = tags.length ? `, { tag: ${JSON.stringify(tags)} }` : "";
-  const lines: string[] = [
+  const header: string[] = [
+    `  name: ${literal(test.description || test.testcaseId)},`,
+    `  application: ${literal(test.application)},`,
+  ];
+  if (labels.length) header.push(`  tags: ${JSON.stringify(labels)},`);
+  if (countries.length) header.push(`  countries: ${JSON.stringify(countries)},`);
+  if (String(test.priority) !== "1") header.push(`  priority: ${literal(test.priority)},`);
+  if (test.status && test.status !== "WORKING") header.push(`  status: ${literal(test.status)},`);
+  if (test.type && test.type !== "AUTOMATED") header.push(`  type: ${literal(test.type)},`);
+  if (hasText(test.detailedDescription)) header.push(`  detailedDescription: ${literal(test.detailedDescription)},`);
+  if (!(test.isActive && test.isActiveQA && test.isActiveUAT && test.isActivePROD)) {
+    header.push(`  active: ${JSON.stringify(activeList(test))},`);
+  }
+
+  const lines = [
     "// Generated by Cerberus CLI.",
-    "// Playwright-like DSL interpreted by Cerberus CLI; it is not executed by Playwright.",
+    "// Declarative Cerberus DSL: this file is parsed by the CLI and is not executed.",
     "",
-    `test(${literal(test.description || test.testcaseId)}${options}, async ({ page, request, cerberus, property }) => {`,
+    "cerberus.testcase({",
+    ...header,
+    "",
+    "  script: ({ step, action, control, property, object, datalib }) => {",
   ];
 
-  lines.push(...renderProperties(test));
+  lines.push(...renderProperties(test, "    "));
 
   for (const step of test.steps ?? []) {
-    lines.push("");
-
     if (step.isUsingLibraryStep) {
       lines.push(
-        `    await cerberus.libraryStep(${JSON.stringify({
+        `    step.library(${JSON.stringify({
           testFolder: step.libraryStepTestFolderId ?? "",
           testcase: step.libraryStepTestcaseId ?? "",
           step: step.libraryStepStepId,
           ...(hasText(step.description) ? { description: step.description } : {}),
-        })});`
+        })});`,
+        ""
       );
       continue;
     }
 
-    lines.push(
-      `    await cerberus.step(${literal(step.description || `Step ${step.stepId}`)}, async () => {`
-    );
-
+    lines.push(`    step(${literal(step.description || `Step ${step.stepId}`)}, () => {`);
     for (const action of [...(step.actions ?? [])].sort((a, b) => Number(a.sort) - Number(b.sort))) {
       lines.push(...renderAction(action));
     }
-
-    lines.push("    });");
+    lines.push("    });", "");
   }
 
-  lines.push("});", "");
+  lines.push("  }", "});", "");
   return lines.join("\n");
 }
 
@@ -403,120 +374,153 @@ export function localTestDirName(test: Pick<TestCaseDetailed, "testcaseId" | "de
     .trim()
     .replace(/[. ]+$/g, "")
     .slice(0, 100);
-
   return description ? `${test.testcaseId} - ${description}` : String(test.testcaseId);
 }
 
+function baselinePath(testDir: string): string {
+  return path.join(testDir, ".sync", "baseline.json");
+}
+
 export function migrateLegacyTestLayout(testDir: string): void {
-  const legacyHeader = path.join(testDir, "cerberus.yaml");
-  const header = path.join(testDir, "header.yaml");
-  if (fs.existsSync(legacyHeader) && !fs.existsSync(header)) fs.renameSync(legacyHeader, header);
-
-  const legacyScript = path.join(testDir, "test.spec.ts");
-  const script = path.join(testDir, "script.ts");
-  if (fs.existsSync(legacyScript) && !fs.existsSync(script)) fs.renameSync(legacyScript, script);
-
-  const legacyDir = path.join(testDir, ".cerberus");
+  const legacySync = path.join(testDir, ".cerberus");
   const syncDir = path.join(testDir, ".sync");
-  if (fs.existsSync(legacyDir) && !fs.existsSync(syncDir)) {
-    fs.renameSync(legacyDir, syncDir);
-  }
+  if (fs.existsSync(legacySync) && !fs.existsSync(syncDir)) fs.renameSync(legacySync, syncDir);
 
-  if (fs.existsSync(syncDir)) {
-    const legacyState = path.join(syncDir, "state.json");
-    const baseline = path.join(syncDir, "baseline.json");
-    if (fs.existsSync(legacyState) && !fs.existsSync(baseline)) fs.renameSync(legacyState, baseline);
-  }
+  const oldState = path.join(syncDir, "state.json");
+  const baseline = baselinePath(testDir);
+  if (fs.existsSync(oldState) && !fs.existsSync(baseline)) fs.renameSync(oldState, baseline);
 }
 
 export function writeLocalTest(testDir: string, test: TestCaseDetailed): void {
   fs.mkdirSync(path.join(testDir, ".sync"), { recursive: true });
-  fs.writeFileSync(path.join(testDir, "header.yaml"), YAML.stringify(toLocalMetadata(test)), "utf8");
-  fs.writeFileSync(path.join(testDir, "script.ts"), generateSpec(test), "utf8");
+  fs.writeFileSync(path.join(testDir, "testcase.ts"), generateSpec(test), "utf8");
   const state: LocalState = { formatVersion: 1, serverPayload: test };
-  fs.writeFileSync(
-    path.join(testDir, ".sync", "baseline.json"),
-    JSON.stringify(state, null, 2) + "\n",
-    "utf8"
-  );
+  fs.writeFileSync(baselinePath(testDir), JSON.stringify(state, null, 2) + "\n", "utf8");
 }
 
-function stringArg(call: ts.CallExpression, index: number): string | undefined {
-  const arg = call.arguments[index];
-  if (!arg) return undefined;
-  if (ts.isStringLiteralLike(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) return arg.text;
-  if (ts.isNumericLiteral(arg)) return arg.text;
-  return undefined;
+function parsePropertyBuilder(expression: ts.Expression): { type: string; values: Record<string, unknown> } | undefined {
+  const chain = decomposeChain(expression);
+  if (!chain || chain.namespace !== "property" || !PROPERTY_TYPE_BY_FACTORY[chain.method]) return undefined;
+
+  const values: Record<string, unknown> = {};
+  const type = PROPERTY_TYPE_BY_FACTORY[chain.method];
+  const primary = parseLiteral(chain.args[0]);
+  if (primary !== undefined) values.value1 = String(primary);
+  else if (type === "text") values.value1 = "";
+
+  for (const modifier of chain.modifiers) {
+    if (modifier.method === "country" || modifier.method === "countries") {
+      const countries = modifier.args
+        .map((arg) => parseLiteral(arg))
+        .filter((value) => value !== undefined)
+        .map(String);
+      values.countries = countries;
+      continue;
+    }
+    const value = parseLiteral(modifier.args[0]);
+    if (value !== undefined) values[modifier.method] = value;
+  }
+
+  if (values.nature !== undefined) values.nature = normalizedNature(values.nature);
+  if (values.length !== undefined) values.length = String(values.length);
+  return { type, values };
 }
 
-function datalibReference(expression: ts.Expression | undefined): string | undefined {
-  if (!expression || !ts.isCallExpression(expression)) return undefined;
-  if (!ts.isPropertyAccessExpression(expression.expression) || expression.expression.name.text !== "value") return undefined;
-  const receiver = expression.expression.expression;
-  if (!ts.isCallExpression(receiver) || !ts.isPropertyAccessExpression(receiver.expression)) return undefined;
-  if (!ts.isIdentifier(receiver.expression.expression) || receiver.expression.expression.text !== "cerberus") return undefined;
-  if (receiver.expression.name.text !== "datalib") return undefined;
-  const name = stringArg(receiver, 0);
-  const subData = stringArg(expression, 0);
-  return name && subData ? `%datalib.${name}.${subData}%` : undefined;
+function propertyTemplate(original: TestCaseDetailed, name: string, index: number): TestCaseProperty {
+  const existing = (original.properties ?? []).find((property) => property.property === name);
+  if (existing) return { ...existing, countries: [...(existing.countries ?? [])] };
+  return {
+    testFolderId: original.testFolderId,
+    testcaseId: original.testcaseId,
+    property: name,
+    type: "text",
+    value1: "",
+    value2: "",
+    value3: "",
+    nature: "STATIC",
+    rank: index + 1,
+    rowLimit: 0,
+    dateCreated: "",
+    dateModif: "",
+    countries: [],
+  };
 }
 
-function propertyReference(expression: ts.Expression | undefined): string | undefined {
-  if (!expression || !ts.isCallExpression(expression)) return undefined;
-  if (!ts.isPropertyAccessExpression(expression.expression)) return undefined;
-  if (!ts.isIdentifier(expression.expression.expression) || expression.expression.expression.text !== "cerberus") return undefined;
-  if (expression.expression.name.text !== "property") return undefined;
-  const name = stringArg(expression, 0);
-  return name ? `%property.${name}%` : undefined;
+function parsePropertyDefinition(
+  name: string,
+  expression: ts.Expression,
+  source: ts.SourceFile,
+  original: TestCaseDetailed,
+  index: number,
+  issues: ValidationIssue[]
+): TestCaseProperty | undefined {
+  const base = propertyTemplate(original, name, index);
+  const literalValue = parseLiteral(expression);
+  if (literalValue !== undefined && !Array.isArray(literalValue)) {
+    return { ...base, type: "text", value1: String(literalValue) };
+  }
+
+  const builder = parsePropertyBuilder(expression);
+  if (!builder) {
+    issues.push({ file: source.fileName, line: sourceLine(source, expression), message: `Unsupported property definition for ${name}.` });
+    return undefined;
+  }
+
+  if (builder.type !== "text" && !hasText(builder.values.value1)) {
+    issues.push({ file: source.fileName, line: sourceLine(source, expression), message: `Property ${name}: ${builder.type} requires a primary value.` });
+    return undefined;
+  }
+  if (builder.type === "getFromSql" && !hasText(builder.values.database)) {
+    issues.push({ file: source.fileName, line: sourceLine(source, expression), message: `Property ${name}: property.fromSql(...) requires .database("...").` });
+    return undefined;
+  }
+
+  const countryValues = Array.isArray(builder.values.countries)
+    ? builder.values.countries.map(String)
+    : undefined;
+  const countries = countryValues
+    ? countryValues.map((value) => (base.countries ?? []).find((c) => c.value === value) ?? { value })
+    : base.countries;
+
+  const { countries: _countries, ...values } = builder.values;
+  return { ...base, ...values, countries, property: name, type: builder.type } as TestCaseProperty;
 }
 
-function dslValueArg(call: ts.CallExpression, index: number): string | undefined {
-  return stringArg(call, index) ?? datalibReference(call.arguments[index]) ?? propertyReference(call.arguments[index]);
-}
+function parseProperties(
+  body: ts.Block,
+  source: ts.SourceFile,
+  original: TestCaseDetailed,
+  issues: ValidationIssue[]
+): TestCaseProperty[] | undefined {
+  for (const statement of body.statements) {
+    if (!ts.isExpressionStatement(statement) || !ts.isCallExpression(statement.expression)) continue;
+    const call = statement.expression;
+    if (!ts.isPropertyAccessExpression(call.expression)) continue;
+    if (!ts.isIdentifier(call.expression.expression) || call.expression.expression.text !== "property") continue;
+    if (call.expression.name.text !== "define") continue;
 
-function sourceLine(source: ts.SourceFile, node: ts.Node): number {
-  return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
-}
+    const arg = call.arguments[0];
+    if (!arg || !ts.isObjectLiteralExpression(arg)) {
+      issues.push({ file: source.fileName, line: sourceLine(source, call), message: "property.define() requires an object literal." });
+      return [];
+    }
 
-function parseLiteral(value: ts.Expression): unknown {
-  if (ts.isStringLiteralLike(value) || ts.isNoSubstitutionTemplateLiteral(value)) return value.text;
-  if (ts.isNumericLiteral(value)) return Number(value.text);
-  if (value.kind === ts.SyntaxKind.TrueKeyword) return true;
-  if (value.kind === ts.SyntaxKind.FalseKeyword) return false;
-  if (ts.isArrayLiteralExpression(value)) {
-    const parsed = value.elements.map((element) => parseLiteral(element as ts.Expression));
-    return parsed.every((item) => item !== undefined) ? parsed : undefined;
+    const result: TestCaseProperty[] = [];
+    for (const item of arg.properties) {
+      if (!ts.isPropertyAssignment(item)) continue;
+      const name = propertyName(item.name);
+      if (!name) continue;
+      const parsed = parsePropertyDefinition(name, item.initializer, source, original, result.length, issues);
+      if (parsed) result.push(parsed);
+    }
+    return result;
   }
   return undefined;
 }
 
-function parseObjectExpression(arg: ts.Expression | undefined): Record<string, unknown> {
-  if (!arg || !ts.isObjectLiteralExpression(arg)) return {};
-
-  const result: Record<string, unknown> = {};
-  for (const prop of arg.properties) {
-    if (!ts.isPropertyAssignment(prop)) continue;
-    const key =
-      ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
-    if (!key) continue;
-
-    const value =
-      parseLiteral(prop.initializer) ??
-      propertyReference(prop.initializer) ??
-      datalibReference(prop.initializer);
-    if (value !== undefined) result[key] = value;
-  }
-
-  return result;
-}
-
-function parseObjectArg(call: ts.CallExpression, index: number): Record<string, unknown> {
-  return parseObjectExpression(call.arguments[index]);
-}
-
-function baseAction(template: TestAction | undefined): TestAction {
+function baseAction(template?: TestAction): TestAction {
   return template
-    ? { ...template, controls: [...(template.controls ?? [])] }
+    ? { ...template, controls: [] }
     : {
         testFolderId: "",
         testcaseId: "",
@@ -534,223 +538,152 @@ function baseAction(template: TestAction | undefined): TestAction {
       };
 }
 
-function locatorValue(call: ts.CallExpression): string | undefined {
-  if (!ts.isPropertyAccessExpression(call.expression)) return undefined;
-  const receiver = call.expression.expression;
-  if (!ts.isCallExpression(receiver)) return undefined;
-  if (!ts.isPropertyAccessExpression(receiver.expression)) return undefined;
-  if (!ts.isIdentifier(receiver.expression.expression) || receiver.expression.expression.text !== "page") {
-    return undefined;
-  }
-  if (receiver.expression.name.text !== "locator") return undefined;
-  return stringArg(receiver, 0);
-}
-
-function cerberusObjectValue(call: ts.CallExpression): string | undefined {
-  if (!ts.isPropertyAccessExpression(call.expression)) return undefined;
-  const receiver = call.expression.expression;
-  if (!ts.isCallExpression(receiver) || !ts.isPropertyAccessExpression(receiver.expression)) return undefined;
-  if (!ts.isIdentifier(receiver.expression.expression) || receiver.expression.expression.text !== "cerberus") return undefined;
-  if (receiver.expression.name.text !== "object") return undefined;
-  const name = stringArg(receiver, 0);
-  return name ? `%object.${name}.value%` : undefined;
-}
-
-function cerberusServiceName(call: ts.CallExpression): string | undefined {
-  if (!ts.isPropertyAccessExpression(call.expression) || call.expression.name.text !== "call") return undefined;
-  const receiver = call.expression.expression;
-  if (!ts.isCallExpression(receiver) || !ts.isPropertyAccessExpression(receiver.expression)) return undefined;
-  if (!ts.isIdentifier(receiver.expression.expression) || receiver.expression.expression.text !== "cerberus") return undefined;
-  if (receiver.expression.name.text !== "service") return undefined;
-  return stringArg(receiver, 0);
-}
-
-function parseMappedCall(
-  call: ts.CallExpression,
-  source: ts.SourceFile,
-  template: TestAction | undefined,
-  issues: ValidationIssue[]
-): TestAction | undefined {
-  if (!ts.isPropertyAccessExpression(call.expression)) return undefined;
-
-  const receiver = call.expression.expression;
-  const method = call.expression.name.text;
-  const base = baseAction(template);
-
-  if (ts.isIdentifier(receiver) && receiver.text === "page") {
-    if (method === "goto") {
-      const value = stringArg(call, 0);
-      if (value === undefined) {
-        issues.push({ file: source.fileName, line: sourceLine(source, call), message: "page.goto() requires a literal URL." });
-        return undefined;
-      }
-      return { ...base, action: "openUrl", value1: value };
-    }
-
-    if (method === "waitForTimeout") {
-      const value = stringArg(call, 0);
-      if (value === undefined) {
-        issues.push({ file: source.fileName, line: sourceLine(source, call), message: "page.waitForTimeout() requires a literal duration." });
-        return undefined;
-      }
-      return { ...base, action: "wait", value1: value };
-    }
-
-    if (method === "evaluate") {
-      const fn = call.arguments[0];
-      if (!fn || (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) || !ts.isBlock(fn.body)) {
-        issues.push({ file: source.fileName, line: sourceLine(source, call), message: "page.evaluate() requires an inline function body." });
-        return undefined;
-      }
-      return {
-        ...base,
-        action: "executeJS",
-        value1: fn.body.statements.map((statement) => statement.getText(source)).join("\n"),
+function baseControl(template?: TestControl): TestControl {
+  return template
+    ? { ...template }
+    : {
+        testFolderId: "",
+        testcaseId: "",
+        stepId: 0,
+        actionId: 0,
+        controlId: 0,
+        sort: 0,
+        conditionOperator: "always",
+        control: "",
+        isFatal: false,
+        doScreenshotBefore: false,
+        doScreenshotAfter: false,
+        waitBefore: 0,
+        waitAfter: 0,
       };
-    }
-  }
-
-  const objectValue = cerberusObjectValue(call);
-  if (objectValue !== undefined) {
-    if (method === "fill") {
-      const value = dslValueArg(call, 0);
-      if (value === undefined) {
-        issues.push({ file: source.fileName, line: sourceLine(source, call), message: "cerberus.object(...).fill() requires a literal value." });
-        return undefined;
-      }
-      return { ...base, action: "type", value1: objectValue, value2: value };
-    }
-    if (method === "click") {
-      return { ...base, action: "click", value1: objectValue };
-    }
-  }
-
-  const serviceName = cerberusServiceName(call);
-  if (serviceName !== undefined) {
-    const opts = parseObjectExpression(call.arguments[0]);
-    return {
-      ...base,
-      action: "callService",
-      value1: serviceName,
-      value2: opts.kafkaEvents !== undefined ? String(opts.kafkaEvents) : "",
-      value3: opts.kafkaWaitSeconds !== undefined ? String(opts.kafkaWaitSeconds) : "",
-    };
-  }
-
-  const locator = locatorValue(call);
-  if (locator !== undefined) {
-    if (method === "fill") {
-      const value = dslValueArg(call, 0);
-      if (value === undefined) {
-        issues.push({ file: source.fileName, line: sourceLine(source, call), message: "locator.fill() requires a literal value." });
-        return undefined;
-      }
-      return { ...base, action: "type", value1: locator, value2: value };
-    }
-
-    if (method === "click") {
-      return { ...base, action: "click", value1: locator };
-    }
-  }
-
-  if (ts.isIdentifier(receiver) && receiver.text === "cerberus" && method === "calculateProperty") {
-    const value = stringArg(call, 0);
-    if (value === undefined) {
-      issues.push({
-        file: source.fileName,
-        line: sourceLine(source, call),
-        message: "cerberus.calculateProperty() requires a literal property name.",
-      });
-      return undefined;
-    }
-    return { ...base, action: "calculateProperty", value1: value };
-  }
-
-  return undefined;
 }
 
-function applyDslMetadata(action: TestAction, metadata: Record<string, unknown>): TestAction {
-  const result = { ...action };
-
-  if (typeof metadata.description === "string") result.description = metadata.description;
-  if (typeof metadata.condition === "string") result.conditionOperator = metadata.condition;
-  if (typeof metadata.fatal === "boolean") result.isFatal = metadata.fatal;
-  if (typeof metadata.waitBefore === "number") result.waitBefore = metadata.waitBefore;
-  if (typeof metadata.waitAfter === "number") result.waitAfter = metadata.waitAfter;
-
-  if (typeof metadata.screenshot === "string") {
-    result.doScreenshotBefore = metadata.screenshot === "before" || metadata.screenshot === "both";
-    result.doScreenshotAfter = metadata.screenshot === "after" || metadata.screenshot === "both";
+function applyModifiers<T extends TestAction | TestControl>(target: T, modifiers: Chain["modifiers"]): T {
+  for (const modifier of modifiers) {
+    const value = parseLiteral(modifier.args[0]);
+    switch (modifier.method) {
+      case "description": if (value !== undefined) target.description = String(value); break;
+      case "condition": if (value !== undefined) target.conditionOperator = String(value); break;
+      case "fatal": if (typeof value === "boolean") target.isFatal = value; break;
+      case "waitBefore": if (value !== undefined) target.waitBefore = Number(value); break;
+      case "waitAfter": if (value !== undefined) target.waitAfter = Number(value); break;
+      case "screenshot": {
+        const mode = String(value ?? "");
+        target.doScreenshotBefore = mode === "before" || mode === "both";
+        target.doScreenshotAfter = mode === "after" || mode === "both";
+        break;
+      }
+      case "value1": target.value1 = parseDslValue(modifier.args[0]) ?? ""; break;
+      case "value2": target.value2 = parseDslValue(modifier.args[0]) ?? ""; break;
+      case "value3": target.value3 = parseDslValue(modifier.args[0]) ?? ""; break;
+    }
   }
+  return target;
+}
 
+function parseOptionsObject(expression: ts.Expression | undefined): Record<string, string> {
+  if (!expression || !ts.isObjectLiteralExpression(expression)) return {};
+  const result: Record<string, string> = {};
+  for (const item of expression.properties) {
+    if (!ts.isPropertyAssignment(item)) continue;
+    const name = propertyName(item.name);
+    if (!name) continue;
+    const value = parseDslValue(item.initializer);
+    if (value !== undefined) result[name] = value;
+  }
   return result;
 }
 
-function parseActionCall(
-  call: ts.CallExpression,
-  source: ts.SourceFile,
+function parseAction(
+  expression: ts.Expression,
   template: TestAction | undefined,
+  source: ts.SourceFile,
   issues: ValidationIssue[]
 ): TestAction | undefined {
-  if (!ts.isPropertyAccessExpression(call.expression)) return undefined;
+  const chain = decomposeChain(expression);
+  if (!chain || chain.namespace !== "action") return undefined;
 
-  const receiver = call.expression.expression;
-  const method = call.expression.name.text;
+  const action = baseAction(template);
+  const arg = (index: number) => parseDslValue(chain.args[index]);
 
-  if (ts.isIdentifier(receiver) && receiver.text === "cerberus" && method === "do") {
-    const inner = call.arguments[0];
-    if (!inner || !ts.isCallExpression(inner)) {
-      issues.push({
-        file: source.fileName,
-        line: sourceLine(source, call),
-        message: "cerberus.do() requires a Playwright/Cerberus call as first argument.",
-      });
-      return undefined;
+  switch (chain.method) {
+    case "openUrl": action.action = "openUrl"; action.value1 = arg(0); break;
+    case "feedField": action.action = "type"; action.value1 = arg(0); action.value2 = arg(1); break;
+    case "click": action.action = "click"; action.value1 = arg(0); break;
+    case "wait": action.action = "wait"; action.value1 = arg(0); break;
+    case "executeJS": action.action = "executeJS"; action.value1 = arg(0); break;
+    case "calculateProperty": action.action = "calculateProperty"; action.value1 = arg(0); break;
+    case "callService": {
+      action.action = "callService";
+      action.value1 = arg(0);
+      const options = parseOptionsObject(chain.args[1]);
+      action.value2 = options.kafkaEvents ?? "";
+      action.value3 = options.kafkaWaitSeconds ?? "";
+      break;
     }
-
-    const action = parseMappedCall(inner, source, template, issues);
-    if (!action) {
-      issues.push({
-        file: source.fileName,
-        line: sourceLine(source, inner),
-        message: `Unsupported expression inside cerberus.do(): ${inner.expression.getText(source)}`,
-      });
-      return undefined;
+    case "custom": {
+      const name = parseLiteral(chain.args[0]);
+      if (typeof name !== "string" || !name) {
+        issues.push({ file: source.fileName, line: sourceLine(source, expression), message: "action.custom() requires a literal action name." });
+        return undefined;
+      }
+      action.action = name;
+      const values = parseOptionsObject(chain.args[1]);
+      action.value1 = values.value1 ?? "";
+      action.value2 = values.value2 ?? "";
+      action.value3 = values.value3 ?? "";
+      break;
     }
-
-    return applyDslMetadata(action, parseObjectExpression(call.arguments[1]));
+    default: {
+      action.action = chain.method;
+      action.value1 = arg(0) ?? "";
+      action.value2 = arg(1) ?? "";
+      action.value3 = arg(2) ?? "";
+    }
   }
 
-  const mapped = parseMappedCall(call, source, template, issues);
-  if (mapped) return mapped;
-
-  if (ts.isIdentifier(receiver) && receiver.text === "cerberus" && method === "action") {
-    const actionName = stringArg(call, 0);
-    if (!actionName) {
-      issues.push({
-        file: source.fileName,
-        line: sourceLine(source, call),
-        message: "cerberus.action() requires a literal action name.",
-      });
-      return undefined;
-    }
-    return { ...baseAction(template), ...parseObjectArg(call, 1), action: actionName } as TestAction;
-  }
-
-  issues.push({
-    file: source.fileName,
-    line: sourceLine(source, call),
-    message:
-      ts.isIdentifier(receiver) && receiver.text === "request"
-        ? `Playwright request.* is reserved but this HTTP call has no Cerberus mapping yet: ${call.expression.getText(source)}`
-        : `Unsupported Cerberus DSL expression: ${call.expression.getText(source)}`,
-  });
-  return undefined;
+  if (!action.action) return undefined;
+  return applyModifiers(action, chain.modifiers);
 }
 
-function baseStep(original: TestCaseDetailed, template: TestCaseStep | undefined, index: number): TestCaseStep {
-  return template
-    ? { ...template, actions: [...(template.actions ?? [])] }
+function parseControl(
+  expression: ts.Expression,
+  template: TestControl | undefined,
+  source: ts.SourceFile,
+  issues: ValidationIssue[]
+): TestControl | undefined {
+  const chain = decomposeChain(expression);
+  if (!chain || chain.namespace !== "control") return undefined;
+
+  const control = baseControl(template);
+  if (chain.method === "custom") {
+    const name = parseLiteral(chain.args[0]);
+    if (typeof name !== "string" || !name) {
+      issues.push({ file: source.fileName, line: sourceLine(source, expression), message: "control.custom() requires a literal control name." });
+      return undefined;
+    }
+    control.control = name;
+    const values = parseOptionsObject(chain.args[1]);
+    control.value1 = values.value1 ?? "";
+    control.value2 = values.value2 ?? "";
+    control.value3 = values.value3 ?? "";
+  } else {
+    control.control = chain.method;
+    control.value1 = parseDslValue(chain.args[0]) ?? "";
+    control.value2 = parseDslValue(chain.args[1]) ?? "";
+    control.value3 = parseDslValue(chain.args[2]) ?? "";
+  }
+  return applyModifiers(control, chain.modifiers);
+}
+
+function stepTemplate(original: TestCaseDetailed, index: number): TestCaseStep | undefined {
+  return [...(original.steps ?? [])].sort((a, b) => Number(a.sort) - Number(b.sort))[index];
+}
+
+function newStep(original: TestCaseDetailed, index: number, description: string): TestCaseStep {
+  const existing = stepTemplate(original, index);
+  return existing
+    ? { ...existing, description, sort: index + 1, actions: [] }
     : {
         testFolderId: original.testFolderId,
         testcaseId: original.testcaseId,
@@ -758,6 +691,7 @@ function baseStep(original: TestCaseDetailed, template: TestCaseStep | undefined
         sort: index + 1,
         loop: "onceIfConditionTrue",
         conditionOperator: "always",
+        description,
         isUsingLibraryStep: false,
         libraryStepStepId: 0,
         isStepInUseByOtherTestcase: false,
@@ -768,338 +702,84 @@ function baseStep(original: TestCaseDetailed, template: TestCaseStep | undefined
       };
 }
 
-function parseLibraryStepCall(
-  call: ts.CallExpression,
-  source: ts.SourceFile,
-  original: TestCaseDetailed,
-  template: TestCaseStep | undefined,
-  index: number,
-  issues: ValidationIssue[]
-): TestCaseStep | undefined {
-  const values = parseObjectExpression(call.arguments[0]);
-  const testFolder = values.testFolder;
-  const testcase = values.testcase;
-  const stepId = values.step;
-
-  if (typeof testFolder !== "string" || !testFolder) {
-    issues.push({ file: source.fileName, line: sourceLine(source, call), message: "cerberus.libraryStep() requires a literal testFolder." });
-    return undefined;
-  }
-  if (typeof testcase !== "string" || !testcase) {
-    issues.push({ file: source.fileName, line: sourceLine(source, call), message: "cerberus.libraryStep() requires a literal testcase." });
-    return undefined;
-  }
-  if (typeof stepId !== "number") {
-    issues.push({ file: source.fileName, line: sourceLine(source, call), message: "cerberus.libraryStep() requires a numeric literal step." });
-    return undefined;
-  }
-
-  const base = baseStep(original, template, index);
-  return {
-    ...base,
-    description:
-      typeof values.description === "string"
-        ? values.description
-        : base.description || `Library step ${testFolder}/${testcase}#${stepId}`,
-    sort: index + 1,
-    isUsingLibraryStep: true,
-    libraryStepTestFolderId: testFolder,
-    libraryStepTestcaseId: testcase,
-    libraryStepStepId: stepId,
-    actions: [],
-  };
-}
-
-/**
- * Les actions et contrôles créés dans le DSL n'ont pas d'identifiants. Or le serveur identifie chaque élément par sa
- * propre clé (dossier, testcase, stepId, actionId, controlId) et ne la déduit pas du parent : une action à
- * stepId 0 / actionId 0 serait insérée dans un step inexistant et disparaîtrait. On complète donc les clés manquantes,
- * sans jamais changer celles qui existent déjà.
- */
-function nextFree(used: Set<number>): number {
-  let id = Math.max(0, ...used) + 1;
-  while (used.has(id)) id++;
-  used.add(id);
-  return id;
-}
-
-function assignIdentifiers(steps: TestCaseStep[], original: TestCaseDetailed): void {
-  const usedSteps = new Set<number>();
-  for (const step of steps) {
-    step.testFolderId = step.testFolderId || original.testFolderId;
-    step.testcaseId = step.testcaseId || original.testcaseId;
-    if (step.stepId > 0 && !usedSteps.has(step.stepId)) usedSteps.add(step.stepId);
-    else step.stepId = nextFree(usedSteps);
-  }
-
-  for (const step of steps) {
-    const usedActions = new Set<number>();
-    for (const action of step.actions ?? []) {
-      action.testFolderId = action.testFolderId || original.testFolderId;
-      action.testcaseId = action.testcaseId || original.testcaseId;
-      action.stepId = step.stepId;
-      if (action.actionId > 0 && !usedActions.has(action.actionId)) usedActions.add(action.actionId);
-      else action.actionId = nextFree(usedActions);
-
-      const usedControls = new Set<number>();
-      for (const control of action.controls ?? []) {
-        control.testFolderId = control.testFolderId || original.testFolderId;
-        control.testcaseId = control.testcaseId || original.testcaseId;
-        control.stepId = action.stepId;
-        control.actionId = action.actionId;
-        if (control.controlId > 0 && !usedControls.has(control.controlId)) usedControls.add(control.controlId);
-        else control.controlId = nextFree(usedControls);
-      }
-    }
-  }
-}
-
-function propertyTemplate(original: TestCaseDetailed, name: string, index: number): NonNullable<TestCaseDetailed["properties"]>[number] {
-  const existing = (original.properties ?? []).find((property) => property.property === name);
-  if (existing) return { ...existing, countries: [...(existing.countries ?? [])] };
-  return {
-    testFolderId: original.testFolderId,
-    testcaseId: original.testcaseId,
-    property: name,
-    type: "text",
-    value1: "",
-    value2: "",
-    value3: "",
-    nature: "STATIC",
-    rank: index + 1,
-    dateCreated: "",
-    dateModif: "",
-    countries: [],
-  };
-}
-
-function parsePropertyBuilder(
-  expression: ts.Expression
-): { type: string; values: Record<string, unknown> } | undefined {
-  const values: Record<string, unknown> = {};
-
-  const walk = (node: ts.Expression): { factory: string; args: ts.NodeArray<ts.Expression> } | undefined => {
-    if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return undefined;
-
-    const receiver = node.expression.expression;
-    const method = node.expression.name.text;
-
-    if (
-      ts.isIdentifier(receiver) &&
-      ["property", "cerberus"].includes(receiver.text) &&
-      PROPERTY_TYPE_BY_FACTORY[method]
-    ) {
-      return { factory: method, args: node.arguments };
-    }
-
-    if (ts.isCallExpression(receiver)) {
-      const base = walk(receiver);
-      if (!base) return undefined;
-
-      if (method === "country" || method === "countries") {
-        const countries = node.arguments
-          .map((arg) => parseLiteral(arg))
-          .filter((value): value is string | number | boolean => value !== undefined)
-          .map((value) => String(value));
-        values.countries = countries;
-        return base;
-      }
-
-      const arg = node.arguments[0];
-      if (arg) {
-        const parsed = parseLiteral(arg);
-        if (parsed !== undefined) values[method] = parsed;
-      }
-      return base;
-    }
-
-    return undefined;
-  };
-
-  const base = walk(expression);
-  if (!base) return undefined;
-
-  const type = PROPERTY_TYPE_BY_FACTORY[base.factory];
-  const first = base.args[0];
-  if (first) {
-    const value = parseLiteral(first);
-    if (value !== undefined) values.value1 = String(value);
-  } else if (type === "text") {
-    values.value1 = "";
-  }
-
-  if (values.nature !== undefined) values.nature = normalizedNature(values.nature);
-  if (values.length !== undefined) values.length = String(values.length);
-  return { type, values };
-}
-
-function parsePropertyDefinition(
-  name: string,
-  expression: ts.Expression,
-  source: ts.SourceFile,
-  original: TestCaseDetailed,
-  index: number,
-  issues: ValidationIssue[]
-): NonNullable<TestCaseDetailed["properties"]>[number] | undefined {
-  const base = propertyTemplate(original, name, index);
-
-  if (ts.isStringLiteralLike(expression) || ts.isNoSubstitutionTemplateLiteral(expression) || ts.isNumericLiteral(expression)) {
-    return { ...base, type: "text", value1: expression.text };
-  }
-
-  const builder = parsePropertyBuilder(expression);
-  if (builder) {
-    const value1 = builder.values.value1;
-    if (builder.type !== "text" && (!hasText(value1))) {
-      issues.push({
-        file: source.fileName,
-        line: sourceLine(source, expression),
-        message: `Property ${name}: ${builder.type} requires a literal primary value.`,
-      });
-      return undefined;
-    }
-
-    if (builder.type === "getFromSql" && !hasText(builder.values.database)) {
-      issues.push({
-        file: source.fileName,
-        line: sourceLine(source, expression),
-        message: `Property ${name}: cerberus.fromSql(...) requires .database("...").`,
-      });
-      return undefined;
-    }
-
-    if (builder.values.nature !== undefined && !["STATIC", "RANDOM", "RANDOMNEW", "NOTINUSE"].includes(String(builder.values.nature))) {
-      issues.push({
-        file: source.fileName,
-        line: sourceLine(source, expression),
-        message: `Property ${name}: unsupported nature '${builder.values.nature}'.`,
-      });
-      return undefined;
-    }
-
-    const countryValues = Array.isArray(builder.values.countries)
-      ? builder.values.countries.map((value) => String(value))
-      : undefined;
-    const countries = countryValues
-      ? countryValues.map((value) =>
-          (base.countries ?? []).find((country) => String(country.value) === value) ?? { value }
-        )
-      : base.countries;
-
-    const { countries: _countries, ...builderValues } = builder.values;
-
-    return {
-      ...base,
-      ...builderValues,
-      countries,
-      property: name,
-      type: builder.type,
-    } as NonNullable<TestCaseDetailed["properties"]>[number];
-  }
-
-  if (ts.isObjectLiteralExpression(expression)) {
-    const detail = parseObjectExpression(expression);
-    if (typeof detail.type !== "string" || !detail.type) {
-      issues.push({ file: source.fileName, line: sourceLine(source, expression), message: `Property ${name}: detailed form requires a literal type.` });
-      return undefined;
-    }
-    return {
-      ...base,
-      ...detail,
-      property: name,
-      type: detail.type,
-    } as NonNullable<TestCaseDetailed["properties"]>[number];
-  }
-
-  issues.push({
-    file: source.fileName,
-    line: sourceLine(source, expression),
-    message: `Unsupported property definition for ${name}. Use a literal, cerberus.fromDataLib(...), cerberus.fromJS(...), or an object literal.`,
-  });
-  return undefined;
-}
-
-function parsePropertyDefinitions(
+function parseSteps(
+  body: ts.Block,
   source: ts.SourceFile,
   original: TestCaseDetailed,
   issues: ValidationIssue[]
-): NonNullable<TestCaseDetailed["properties"]> | undefined {
-  let found: NonNullable<TestCaseDetailed["properties"]> | undefined;
+): TestCaseStep[] {
+  const steps: TestCaseStep[] = [];
 
-  const visit = (node: ts.Node): void => {
-    if (
-      !found &&
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      ts.isIdentifier(node.expression.expression) &&
-      node.expression.expression.text === "cerberus" &&
-      node.expression.name.text === "properties"
-    ) {
-      const arg = node.arguments[0];
-      if (!arg || !ts.isObjectLiteralExpression(arg)) {
-        issues.push({ file: source.fileName, line: sourceLine(source, node), message: "cerberus.properties() requires an object literal." });
-        found = [];
-        return;
+  for (const statement of body.statements) {
+    if (!ts.isExpressionStatement(statement) || !ts.isCallExpression(statement.expression)) continue;
+    const call = statement.expression;
+
+    if (ts.isPropertyAccessExpression(call.expression) &&
+        ts.isIdentifier(call.expression.expression) &&
+        call.expression.expression.text === "step" &&
+        call.expression.name.text === "library") {
+      const arg = call.arguments[0];
+      if (!arg || !ts.isObjectLiteralExpression(arg)) continue;
+      const get = (name: string) => parseLiteral(findProperty(arg, name)?.initializer);
+      const step = newStep(original, steps.length, String(get("description") ?? "Library step"));
+      step.isUsingLibraryStep = true;
+      step.libraryStepTestFolderId = String(get("testFolder") ?? "");
+      step.libraryStepTestcaseId = String(get("testcase") ?? "");
+      step.libraryStepStepId = Number(get("step") ?? 0);
+      steps.push(step);
+      continue;
+    }
+
+    if (!ts.isIdentifier(call.expression) || call.expression.text !== "step") continue;
+    const description = parseLiteral(call.arguments[0]);
+    const callback = call.arguments[1];
+    if (typeof description !== "string" || !(callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) || !ts.isBlock(callback.body)) {
+      issues.push({ file: source.fileName, line: sourceLine(source, call), message: "step() requires a literal description and a block callback." });
+      continue;
+    }
+
+    const base = newStep(original, steps.length, description);
+    const oldActions = [...(stepTemplate(original, steps.length)?.actions ?? [])].sort((a, b) => Number(a.sort) - Number(b.sort));
+    const actions: TestAction[] = [];
+
+    for (const child of callback.body.statements) {
+      if (!ts.isExpressionStatement(child)) continue;
+      const expression = child.expression;
+
+      const parsedAction = parseAction(expression, oldActions[actions.length], source, issues);
+      if (parsedAction) {
+        parsedAction.sort = actions.length + 1;
+        parsedAction.controls = [];
+        actions.push(parsedAction);
+        continue;
       }
 
-      found = [];
-      for (const prop of arg.properties) {
-        if (!ts.isPropertyAssignment(prop)) {
-          issues.push({ file: source.fileName, line: sourceLine(source, prop), message: "cerberus.properties() only supports explicit property assignments." });
+      const last = actions[actions.length - 1];
+      const parsedControl = parseControl(
+        expression,
+        last ? oldActions[actions.length - 1]?.controls?.[last.controls.length] : undefined,
+        source,
+        issues
+      );
+      if (parsedControl) {
+        if (!last) {
+          issues.push({ file: source.fileName, line: sourceLine(source, expression), message: "A control must follow an action inside the same step." });
           continue;
         }
-        const name = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
-        if (!name) {
-          issues.push({ file: source.fileName, line: sourceLine(source, prop), message: "Property names must be literal." });
-          continue;
-        }
-        const parsed = parsePropertyDefinition(name, prop.initializer, source, original, found.length, issues);
-        if (parsed) found.push(parsed);
-      }
-      return;
-    }
-    ts.forEachChild(node, visit);
-  };
-
-  visit(source);
-  return found;
-}
-
-function extractTestTags(source: ts.SourceFile): string[] {
-  let tags: string[] = [];
-
-  const visit = (node: ts.Node): void => {
-    if (
-      tags.length === 0 &&
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "test" &&
-      node.arguments.length >= 3
-    ) {
-      const options = node.arguments[1];
-      if (options && ts.isObjectLiteralExpression(options)) {
-        for (const prop of options.properties) {
-          if (!ts.isPropertyAssignment(prop)) continue;
-          const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : "";
-          if (key !== "tag") continue;
-          const value = parseLiteral(prop.initializer);
-          const values = Array.isArray(value) ? value : [value];
-          tags = values
-            .filter((item): item is string => typeof item === "string")
-            .map((item) => item.trim())
-            .filter(Boolean);
-        }
+        parsedControl.sort = last.controls.length + 1;
+        last.controls.push(parsedControl);
       }
     }
-    ts.forEachChild(node, visit);
-  };
 
-  visit(source);
-  return tags;
+    base.actions = actions;
+    steps.push(base);
+  }
+
+  return steps;
 }
 
-function labelCatalogForTest(testDir: string): Array<Record<string, any>> {
-  let current = path.resolve(testDir);
+function labelCatalogForTest(testDir: string): TestCaseLabel[] {
+  let current = testDir;
   for (let i = 0; i < 6; i++) {
     const file = path.join(current, ".cerberus", "labels.json");
     if (fs.existsSync(file)) {
@@ -1117,372 +797,170 @@ function labelCatalogForTest(testDir: string): Array<Record<string, any>> {
   return [];
 }
 
-function resolveTags(
-  testDir: string,
-  tags: string[],
-  original: TestCaseDetailed,
-  issues: ValidationIssue[],
-  specPath: string
-): NonNullable<TestCaseDetailed["labels"]> {
+function resolveTags(testDir: string, tags: string[], original: TestCaseDetailed, issues: ValidationIssue[], file: string): TestCaseLabel[] {
   const catalog = labelCatalogForTest(testDir);
   const baseline = original.labels ?? [];
-  const labels: NonNullable<TestCaseDetailed["labels"]> = [];
+  const result: TestCaseLabel[] = [];
 
-  for (const tag of tags) {
-    const name = tag.replace(/^@/, "");
-    const matches = catalog.filter((label) => String(label.label ?? "").toLowerCase() === name.toLowerCase());
-    const baselineMatch = baseline.find((label) => String(label.label ?? "").toLowerCase() === name.toLowerCase());
-
-    if (matches.length === 1) {
-      labels.push(matches[0] as NonNullable<TestCaseDetailed["labels"]>[number]);
+  for (const raw of tags) {
+    const name = raw.replace(/^@/, "");
+    const matches = catalog.filter((label) => label.label.toLowerCase() === name.toLowerCase());
+    if (matches.length === 1) { result.push(matches[0]); continue; }
+    if (matches.length > 1) {
+      issues.push({ file, message: `Ambiguous Cerberus label tag: ${raw}.` });
       continue;
     }
-    if (matches.length === 0 && baselineMatch) {
-      labels.push(baselineMatch);
-      continue;
-    }
-    if (matches.length === 0) {
-      issues.push({ file: specPath, message: `Unknown Cerberus label tag: ${tag}. Run 'cerberus pull' or use an existing label.` });
-      continue;
-    }
-
-    issues.push({
-      file: specPath,
-      message: `Ambiguous Cerberus label tag: ${tag} matches ${matches.length} labels. Use a unique label name before push.`,
-    });
+    const previous = baseline.find((label) => label.label.toLowerCase() === name.toLowerCase());
+    if (previous) { result.push(previous); continue; }
+    issues.push({ file, message: `Unknown Cerberus label tag: ${raw}. Run 'cerberus pull' or use an existing label.` });
   }
 
-  return labels;
+  return result;
 }
 
-export function parseSpec(
-  specPath: string,
-  original: TestCaseDetailed
-): { steps: TestCaseStep[]; issues: ValidationIssue[]; tags: string[]; properties?: NonNullable<TestCaseDetailed["properties"]> } {
-  const text = fs.readFileSync(specPath, "utf8");
-  const source = ts.createSourceFile(specPath, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const issues: ValidationIssue[] = [];
-  const steps: TestCaseStep[] = [];
-  const tags = extractTestTags(source);
-  const properties = parsePropertyDefinitions(source, original, issues);
+function parseTestcase(testDir: string, source: ts.SourceFile, original: TestCaseDetailed, issues: ValidationIssue[]): TestCaseDetailed {
+  let testcaseCall: ts.CallExpression | undefined;
 
   const visit = (node: ts.Node): void => {
     if (
+      !testcaseCall &&
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
       ts.isIdentifier(node.expression.expression) &&
       node.expression.expression.text === "cerberus" &&
-      node.expression.name.text === "libraryStep"
+      node.expression.name.text === "testcase"
     ) {
-      const libraryStep = parseLibraryStepCall(
-        node,
-        source,
-        original,
-        original.steps?.[steps.length],
-        steps.length,
-        issues
-      );
-      if (libraryStep) steps.push(libraryStep);
+      testcaseCall = node;
       return;
     }
-
-    if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      ts.isIdentifier(node.expression.expression) &&
-      node.expression.expression.text === "cerberus" &&
-      node.expression.name.text === "step"
-    ) {
-      const description = stringArg(node, 0) ?? `Step ${steps.length + 1}`;
-      const callback = node.arguments[1];
-
-      if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) || !ts.isBlock(callback.body)) {
-        issues.push({
-          file: specPath,
-          line: sourceLine(source, node),
-          message: "cerberus.step() requires an inline function.",
-        });
-        return;
-      }
-
-      // generateSpec écrit les actions triées par sort : les identifiants d'origine doivent être relus dans le même ordre
-      const rawStep = original.steps?.[steps.length];
-      const originalStep = rawStep
-        ? { ...rawStep, actions: [...(rawStep.actions ?? [])].sort((a, b) => Number(a.sort) - Number(b.sort)) }
-        : undefined;
-      const actions: TestAction[] = [];
-
-      for (const statement of callback.body.statements) {
-        if (!ts.isExpressionStatement(statement)) continue;
-        let expression: ts.Expression = statement.expression;
-        if (ts.isAwaitExpression(expression)) expression = expression.expression;
-        if (!ts.isCallExpression(expression)) continue;
-
-        if (
-          ts.isPropertyAccessExpression(expression.expression) &&
-          ts.isIdentifier(expression.expression.expression) &&
-          expression.expression.expression.text === "cerberus" &&
-          expression.expression.name.text === "control"
-        ) {
-          const lastAction = actions[actions.length - 1];
-          if (!lastAction) {
-            issues.push({
-              file: specPath,
-              line: sourceLine(source, expression),
-              message: "cerberus.control() must follow an action.",
-            });
-            continue;
-          }
-
-          const controlName = stringArg(expression, 0);
-          if (!controlName) {
-            issues.push({
-              file: specPath,
-              line: sourceLine(source, expression),
-              message: "cerberus.control() requires a literal control name.",
-            });
-            continue;
-          }
-
-          const existing =
-            originalStep?.actions?.[actions.length - 1]?.controls?.[lastAction.controls?.length ?? 0];
-
-          const control: TestControl = {
-            ...(existing ?? {
-              testFolderId: lastAction.testFolderId,
-              testcaseId: lastAction.testcaseId,
-              stepId: lastAction.stepId,
-              actionId: lastAction.actionId,
-              controlId: (lastAction.controls?.length ?? 0) + 1,
-              sort: (lastAction.controls?.length ?? 0) + 1,
-              conditionOperator: "always",
-              control: controlName,
-              isFatal: false,
-              doScreenshotBefore: false,
-              doScreenshotAfter: false,
-              waitBefore: 0,
-              waitAfter: 0,
-            }),
-            ...parseObjectArg(expression, 1),
-            control: controlName,
-          } as TestControl;
-
-          lastAction.controls = [...(lastAction.controls ?? []), control];
-          continue;
-        }
-
-        const action = parseActionCall(
-          expression,
-          source,
-          originalStep?.actions?.[actions.length],
-          issues
-        );
-        if (!action) continue;
-
-        action.sort = actions.length + 1;
-        action.controls = [];
-        actions.push(action);
-      }
-
-      steps.push({
-        ...baseStep(original, originalStep, steps.length),
-        description,
-        sort: steps.length + 1,
-        isUsingLibraryStep: false,
-        libraryStepTestFolderId: undefined,
-        libraryStepTestcaseId: undefined,
-        libraryStepStepId: 0,
-        actions,
-      });
-
-      return;
-    }
-
     ts.forEachChild(node, visit);
   };
-
   visit(source);
 
-  const findActionsOutsideSteps = (node: ts.Node, insideStep: boolean): void => {
-    if (ts.isCallExpression(node)) {
-      if (
-        ts.isPropertyAccessExpression(node.expression) &&
-        ts.isIdentifier(node.expression.expression) &&
-        node.expression.expression.text === "cerberus" &&
-        node.expression.name.text === "libraryStep"
-      ) {
-        return;
-      }
-
-      if (
-        ts.isPropertyAccessExpression(node.expression) &&
-        ts.isIdentifier(node.expression.expression) &&
-        node.expression.expression.text === "cerberus" &&
-        node.expression.name.text === "step"
-      ) {
-        for (const arg of node.arguments) {
-          if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
-            ts.forEachChild(arg, (child) => findActionsOutsideSteps(child, true));
-          }
-        }
-        return;
-      }
-
-      let isDslAction = false;
-
-      if (ts.isPropertyAccessExpression(node.expression)) {
-        const receiver = node.expression.expression;
-
-        if (ts.isIdentifier(receiver) && ["page", "request"].includes(receiver.text)) {
-          const method = node.expression.name.text;
-          const selectorBuilder =
-            receiver.text === "page" &&
-            ["locator", "getByRole", "getByText", "getByLabel", "getByPlaceholder", "getByTestId", "getByAltText", "getByTitle"].includes(method);
-          isDslAction = !selectorBuilder;
-        } else if (
-          ts.isIdentifier(receiver) &&
-          receiver.text === "cerberus" &&
-          ["do", "action", "control", "calculateProperty"].includes(node.expression.name.text)
-        ) {
-          isDslAction = true;
-        } else if (
-          ts.isCallExpression(receiver) &&
-          ts.isPropertyAccessExpression(receiver.expression) &&
-          ts.isIdentifier(receiver.expression.expression) &&
-          ["page", "cerberus"].includes(receiver.expression.expression.text)
-        ) {
-          const builder = receiver.expression.name.text;
-          isDslAction =
-            receiver.expression.expression.text === "page" ||
-            ["object", "service"].includes(builder);
-        }
-      }
-
-      if (isDslAction && !insideStep) {
-        issues.push({
-          file: specPath,
-          line: sourceLine(source, node),
-          message:
-            "Action outside cerberus.step(...). Run 'cerberus prepare' and group Playwright actions into functional Cerberus steps before push.",
-        });
-      }
-    }
-
-    ts.forEachChild(node, (child) => findActionsOutsideSteps(child, insideStep));
-  };
-
-  findActionsOutsideSteps(source, false);
-
-  if (steps.length === 0) {
-    issues.push({
-      file: specPath,
-      message:
-        "No Cerberus step found. Pure Playwright is accepted as a draft, but must be enriched with cerberus.step(...) or cerberus.libraryStep(...) before validate/push.",
-    });
+  if (!testcaseCall) {
+    issues.push({ file: source.fileName, message: "Missing cerberus.testcase({...})." });
+    return original;
   }
 
-  assignIdentifiers(steps, original);
-  return { steps, issues, tags, properties };
-}
+  const arg = testcaseCall.arguments[0];
+  if (!arg || !ts.isObjectLiteralExpression(arg)) {
+    issues.push({ file: source.fileName, line: sourceLine(source, testcaseCall), message: "cerberus.testcase() requires an object literal." });
+    return original;
+  }
 
-function draftStateFromMetadata(testDir: string, metadata: LocalMetadata): LocalState {
-  const parts = testDir.split(path.sep);
-  const folderFromPath = parts[parts.length - 2] ?? "";
-  const testcaseFromPath = parts[parts.length - 1] ?? "";
+  const getLiteral = (name: string) => parseLiteral(findProperty(arg, name)?.initializer);
+  const name = getLiteral("name");
+  const application = getLiteral("application");
+  if (typeof name !== "string" || !name.trim()) issues.push({ file: source.fileName, message: "testcase.name is required." });
+  if (typeof application !== "string" || !application.trim()) issues.push({ file: source.fileName, message: "testcase.application is required." });
 
-  const serverPayload: TestCaseDetailed = {
-    testFolderId: metadata.testFolder || folderFromPath,
-    testcaseId: metadata.testcase || testcaseFromPath,
-    application: metadata.application,
-    description: metadata.description,
-    detailedDescription: metadata.detailedDescription,
-    priority: metadata.priority ?? 1,
-    version: 0,
-    status: metadata.status || "WORKING",
-    isActive: metadata.active?.default ?? true,
-    isActiveQA: metadata.active?.QA ?? true,
-    isActiveUAT: metadata.active?.UAT ?? true,
-    isActivePROD: metadata.active?.PROD ?? true,
-    conditionOperator: metadata.conditionOperator || "always",
-    type: metadata.type || "AUTOMATED",
-    usrCreated: "",
-    dateCreated: "",
-    steps: [],
-    properties: Array.isArray(metadata.properties)
-      ? (metadata.properties as TestCaseDetailed["properties"])
-      : [],
+  const data: TestCaseDetailed & { countries?: TestCaseCountry[] } = {
+    ...original,
+    description: typeof name === "string" ? name : original.description,
+    application: typeof application === "string" ? application : original.application,
   };
 
-  return { formatVersion: 1, serverPayload };
+  const detailedDescription = getLiteral("detailedDescription");
+  if (typeof detailedDescription === "string") data.detailedDescription = detailedDescription;
+  const priority = getLiteral("priority");
+  if (priority !== undefined) data.priority = priority as string | number;
+  const status = getLiteral("status");
+  if (typeof status === "string") data.status = status;
+  const type = getLiteral("type");
+  if (typeof type === "string") data.type = type;
+
+  const active = getLiteral("active");
+  if (Array.isArray(active)) {
+    const values = active.map(String);
+    data.isActive = true;
+    data.isActiveQA = values.includes("QA");
+    data.isActiveUAT = values.includes("UAT");
+    data.isActivePROD = values.includes("PROD");
+  }
+
+  const countries = getLiteral("countries");
+  if (Array.isArray(countries)) {
+    const old = (original as TestCaseDetailed & { countries?: TestCaseCountry[] }).countries ?? [];
+    data.countries = countries.map(String).map((value) => old.find((c) => c.value === value) ?? { value });
+  }
+
+  const tags = getLiteral("tags");
+  if (Array.isArray(tags)) data.labels = resolveTags(testDir, tags.map(String), original, issues, source.fileName);
+
+  const scriptProp = findProperty(arg, "script");
+  if (!scriptProp || !(ts.isArrowFunction(scriptProp.initializer) || ts.isFunctionExpression(scriptProp.initializer)) || !ts.isBlock(scriptProp.initializer.body)) {
+    issues.push({ file: source.fileName, message: "testcase.script must be a block callback." });
+    return data;
+  }
+
+  data.properties = parseProperties(scriptProp.initializer.body, source, original, issues) ?? original.properties;
+  data.steps = parseSteps(scriptProp.initializer.body, source, original, issues);
+  return data;
+}
+
+function draftState(testDir: string): LocalState {
+  const parts = testDir.split(path.sep);
+  const testFolderId = parts[parts.length - 2] ?? "";
+  return {
+    formatVersion: 1,
+    serverPayload: {
+      testFolderId,
+      testcaseId: "",
+      application: "",
+      description: path.basename(testDir),
+      priority: 1,
+      version: 0,
+      status: "WORKING",
+      isActive: true,
+      isActiveQA: true,
+      isActiveUAT: true,
+      isActivePROD: true,
+      conditionOperator: "always",
+      type: "AUTOMATED",
+      usrCreated: "",
+      dateCreated: "",
+      steps: [],
+      properties: [],
+      labels: [],
+      countries: [],
+    } as TestCaseDetailed,
+  };
 }
 
 export function readLocalTest(testDir: string): { data: TestCaseDetailed; issues: ValidationIssue[] } {
   migrateLegacyTestLayout(testDir);
-  const metadataPath = path.join(testDir, "header.yaml");
-  const specPath = path.join(testDir, "script.ts");
-  const statePath = path.join(testDir, ".sync", "baseline.json");
+  const file = path.join(testDir, "testcase.ts");
+  if (!fs.existsSync(file)) throw new Error(`Missing ${file}. Run 'pull' to regenerate the native Cerberus DSL.`);
 
-  if (!fs.existsSync(metadataPath)) throw new Error(`Missing ${metadataPath}`);
-  if (!fs.existsSync(specPath)) throw new Error(`Missing ${specPath}`);
-  const metadata = YAML.parse(fs.readFileSync(metadataPath, "utf8")) as LocalMetadata;
-  const state = fs.existsSync(statePath)
-    ? (JSON.parse(fs.readFileSync(statePath, "utf8")) as LocalState)
-    : draftStateFromMetadata(testDir, metadata);
+  const state = fs.existsSync(baselinePath(testDir))
+    ? JSON.parse(fs.readFileSync(baselinePath(testDir), "utf8")) as LocalState
+    : draftState(testDir);
 
-  if (metadata.formatVersion !== 1 || state.formatVersion !== 1) {
-    throw new Error(`Unsupported local format in ${testDir}`);
-  }
+  const source = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const issues: ValidationIssue[] = source.parseDiagnostics.map((diag) => ({
+    file,
+    line: diag.start === undefined ? undefined : source.getLineAndCharacterOfPosition(diag.start).line + 1,
+    message: ts.flattenDiagnosticMessageText(diag.messageText, "\n"),
+  }));
 
-  const data: TestCaseDetailed = {
-    ...state.serverPayload,
-    testFolderId: metadata.testFolder,
-    testcaseId: metadata.testcase,
-    application: metadata.application,
-    description: metadata.description,
-    detailedDescription: metadata.detailedDescription,
-    priority: metadata.priority,
-    status: metadata.status,
-    type: metadata.type,
-    isActive: metadata.active?.default ?? state.serverPayload.isActive,
-    isActiveQA: metadata.active?.QA ?? state.serverPayload.isActiveQA,
-    isActiveUAT: metadata.active?.UAT ?? state.serverPayload.isActiveUAT,
-    isActivePROD: metadata.active?.PROD ?? state.serverPayload.isActivePROD,
-    conditionOperator: metadata.conditionOperator ?? state.serverPayload.conditionOperator,
-    properties: state.serverPayload.properties,
-  };
-
-  const parsed = parseSpec(specPath, data);
-  data.steps = parsed.steps;
-  data.properties = parsed.properties ??
-    (Array.isArray(metadata.properties)
-      ? (metadata.properties as TestCaseDetailed["properties"])
-      : state.serverPayload.properties);
-  data.labels = resolveTags(testDir, parsed.tags, state.serverPayload, parsed.issues, specPath);
-  return { data, issues: parsed.issues };
+  const data = parseTestcase(testDir, source, state.serverPayload, issues);
+  return { data, issues };
 }
 
 export function findLocalTestDirs(baseDir: string): string[] {
   if (!fs.existsSync(baseDir)) return [];
-
   const result: string[] = [];
 
   for (const folder of fs.readdirSync(baseDir, { withFileTypes: true })) {
     if (!folder.isDirectory() || folder.name.startsWith(".")) continue;
-
     const folderPath = path.join(baseDir, folder.name);
+
     for (const testcase of fs.readdirSync(folderPath, { withFileTypes: true })) {
       if (!testcase.isDirectory() || testcase.name.startsWith(".")) continue;
-
       const testDir = path.join(folderPath, testcase.name);
       migrateLegacyTestLayout(testDir);
-      if (
-        fs.existsSync(path.join(testDir, "header.yaml")) &&
-        fs.existsSync(path.join(testDir, "script.ts"))
-      ) {
-        result.push(testDir);
-      }
+      if (fs.existsSync(path.join(testDir, "testcase.ts"))) result.push(testDir);
     }
   }
-
   return result;
 }
