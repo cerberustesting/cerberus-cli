@@ -435,7 +435,7 @@ function parseMappedCall(
 
   if (ts.isIdentifier(receiver) && receiver.text === "page") {
     if (method === "goto") {
-      const value = dslValueArg(call, 0);
+      const value = stringArg(call, 0);
       if (value === undefined) {
         issues.push({ file: source.fileName, line: sourceLine(source, call), message: "page.goto() requires a literal URL." });
         return undefined;
@@ -444,7 +444,7 @@ function parseMappedCall(
     }
 
     if (method === "waitForTimeout") {
-      const value = dslValueArg(call, 0);
+      const value = stringArg(call, 0);
       if (value === undefined) {
         issues.push({ file: source.fileName, line: sourceLine(source, call), message: "page.waitForTimeout() requires a literal duration." });
         return undefined;
