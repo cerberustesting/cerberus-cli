@@ -43,7 +43,7 @@ export function loadConfig(): CerberusConfig {
     return {
         apiUrl: project.apiUrl,
         apiVersion: project.apiVersion ?? "1",
-        defaultBaseDir: project.defaultBaseDir ?? "./tests",
+        defaultBaseDir: project.defaultBaseDir ?? "./cerberus",
         application: project.application,
         country: project.country,
         environment: project.environment,
