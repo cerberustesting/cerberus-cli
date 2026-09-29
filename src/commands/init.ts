@@ -73,7 +73,7 @@ Quand l'utilisateur demande « convertis en Cerberus », « Cerberusify », « c
 7. lancer \`cerberus validate\` et corriger toutes les erreurs ;
 8. lancer \`cerberus push <dossier/id> --dry-run\`, examiner les changements, puis \`cerberus push <dossier/id>\` si le résultat est cohérent.
 
-Pour créer un nouveau testcase local, créer \`<dossier>/<testcase>/cerberus.yaml\` et \`test.spec.ts\` sans \`.cerberus/state.json\`. Après \`validate\`, un \`push\` créera le testcase. Si le serveur attribue un autre testcaseId, le CLI adopte cet ID et renomme le dossier local.
+Pour créer un nouveau testcase local, créer \`<dossier>/<nom-provisoire>/cerberus.yaml\` et \`test.spec.ts\` sans \`.cerberus/state.json\`. Après \`validate\`, un \`push\` crée le testcase sans envoyer de \`testcaseId\` : Cerberus attribue l'ID disponible, puis le CLI adopte cet ID et renomme le dossier local.
 
 Le rôle de l'IA est d'ajouter la structure et les métadonnées Cerberus autour du Playwright existant, pas de réécrire inutilement
 le scénario ni d'en changer l'intention fonctionnelle.
