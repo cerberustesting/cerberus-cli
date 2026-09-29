@@ -20,6 +20,7 @@ interface ResourceSpec {
   naturalIdentity?(payload: Payload): string;
   fileName(payload: Payload): string;
   editable(payload: Payload): Payload;
+  fromLocal?(local: Payload, baseline?: Payload): Payload;
   validate(payload: Payload, file: string): string[];
   hydrateListItem?: boolean;
 }
@@ -53,6 +54,66 @@ function required(payload: Payload, file: string, fields: string[]): string[] {
   return fields
     .filter((f) => payload[f] === undefined || payload[f] === null || String(payload[f]).trim() === "")
     .map((f) => `${file} - champ obligatoire manquant : ${f}`);
+}
+
+function compactDataLib(payload: Payload): Payload {
+  const type = String(payload.type ?? "").toUpperCase();
+  const data: Record<string, unknown> = {};
+
+  for (const item of payload.subData ?? []) {
+    const key = String(item.subData ?? "").trim() || "default";
+    let value: unknown;
+    if (type === "INTERNAL") value = item.value;
+    else if (type === "SERVICE") value = item.parsingAnswer;
+    else if (type === "DATABASE") value = item.column;
+    else if (type === "CSV" || type === "FILE") value = item.columnPosition;
+    else value = item.value;
+
+    if (value !== undefined && value !== null && String(value) !== "") {
+      data[key] = value;
+    }
+  }
+
+  const out: Payload = {};
+  for (const [key, value] of Object.entries(withoutVolatile(payload, ["subData"]))) {
+    if (value === undefined || value === null || value === "" || value === false) continue;
+    if (key === "id" || key === "name" || key === "type") {
+      out[key] = value;
+      continue;
+    }
+    out[key] = value;
+  }
+  out.data = data;
+  return out;
+}
+
+function expandDataLib(local: Payload, baseline?: Payload): Payload {
+  const type = String(local.type ?? baseline?.type ?? "").toUpperCase();
+  const baselineItems = Array.isArray(baseline?.subData) ? baseline!.subData : [];
+  const data = local.data && typeof local.data === "object" && !Array.isArray(local.data)
+    ? local.data as Record<string, unknown>
+    : {};
+
+  const subData = Object.entries(data).map(([key, value]) => {
+    const subName = key === "default" ? "" : key;
+    const previous = baselineItems.find((item: any) => String(item.subData ?? "") === subName) ?? {};
+    const next: Payload = { ...previous, subData: subName };
+
+    if (type === "INTERNAL") next.value = value;
+    else if (type === "SERVICE") next.parsingAnswer = value;
+    else if (type === "DATABASE") next.column = value;
+    else if (type === "CSV" || type === "FILE") next.columnPosition = value;
+    else next.value = value;
+
+    return next;
+  });
+
+  const { data: _data, ...rest } = local;
+  return {
+    ...(baseline ?? {}),
+    ...rest,
+    subData,
+  };
 }
 
 const specs: ResourceSpec[] = [
@@ -103,7 +164,8 @@ const specs: ResourceSpec[] = [
     identity: (p) => p.id != null ? String(p.id) : `${p.name ?? ""}|${p.system ?? ""}|${p.environment ?? ""}|${p.country ?? ""}`,
     naturalIdentity: (p) => `${p.name ?? ""}|${p.system ?? ""}|${p.environment ?? ""}|${p.country ?? ""}|${p.type ?? ""}`,
     fileName: (p) => p.id != null ? `${p.id} - ${safeName(p.name)}.ts` : `${safeName(p.name)}.ts`,
-    editable: (p) => withoutVolatile(p),
+    editable: (p) => compactDataLib(p),
+    fromLocal: (local, baseline) => expandDataLib(local, baseline),
     validate: (p, file) => required(p, file, ["name", "type"]),
     hydrateListItem: true,
   },
@@ -219,7 +281,9 @@ function locallyModified(dir: string, spec: ResourceSpec, file: string): boolean
   const state = readState(dir, path.basename(file));
   if (!state) return true;
   try {
-    return !sameContent(readResourceFile(file), spec.editable(state.serverPayload));
+    const local = readResourceFile(file);
+    const normalized = spec.fromLocal ? spec.fromLocal(local, state.serverPayload) : local;
+    return !sameContent(spec.editable(normalized), spec.editable(state.serverPayload));
   } catch {
     return true;
   }
@@ -372,6 +436,7 @@ export async function pushResources(config: CerberusConfig, opts: PushResourceOp
       }
 
       const current = state?.serverPayload;
+      local = spec.fromLocal ? spec.fromLocal(local, current) : local;
       let server: Payload | undefined;
       const lookupPayload = current ?? local;
       const getUrl = spec.getPath(lookupPayload, config);
