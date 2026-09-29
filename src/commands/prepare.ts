@@ -31,6 +31,15 @@ function isCerberusStep(call: ts.CallExpression): boolean {
   );
 }
 
+function isCerberusLibraryStep(call: ts.CallExpression): boolean {
+  return (
+    ts.isPropertyAccessExpression(call.expression) &&
+    ts.isIdentifier(call.expression.expression) &&
+    call.expression.expression.text === "cerberus" &&
+    call.expression.name.text === "libraryStep"
+  );
+}
+
 function isCerberusDo(call: ts.CallExpression): boolean {
   return (
     ts.isPropertyAccessExpression(call.expression) &&
@@ -103,6 +112,11 @@ function analyzeSpec(testDir: string): PrepareReport {
 
   const visit = (node: ts.Node, insideStep: boolean): void => {
     if (ts.isCallExpression(node)) {
+      if (isCerberusLibraryStep(node)) {
+        steps++;
+        return;
+      }
+
       if (isCerberusStep(node)) {
         steps++;
         for (const arg of node.arguments) {
@@ -141,7 +155,7 @@ function analyzeSpec(testDir: string): PrepareReport {
 
   const suggestions: string[] = [];
   if (steps === 0 && playwrightActions > 0) {
-    suggestions.push("Regrouper les actions Playwright par intention métier dans un ou plusieurs cerberus.step(...).");
+    suggestions.push("Regrouper les actions Playwright par intention métier dans un ou plusieurs cerberus.step(...), ou utiliser cerberus.libraryStep(...) pour une référence de librairie existante.");
   }
   if (actionsOutsideSteps > 0) {
     suggestions.push(`${actionsOutsideSteps} action(s) sont hors d'un cerberus.step(...).`);
