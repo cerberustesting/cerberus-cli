@@ -130,20 +130,7 @@ interface CerberusPropertyBuilder {
     description(value: string): CerberusPropertyBuilder;
 }
 
-interface Cerberus {
-    step(description: string, body: () => Promise<void>): Promise<void>;
-    /** Référence un ApplicationObject Cerberus par son nom. */
-    object(name: string): CerberusObjectRef;
-    /** Référence un service Cerberus et déclenche l'action callService. */
-    service(name: string): CerberusServiceRef;
-    /** Référence une DataLib Cerberus dans une valeur. */
-    datalib(name: string): CerberusDataLibRef;
-    /** Déclare les propriétés du testcase au début du test. */
-    properties(definitions: Record<string, string | number | CerberusPropertyDefinition | CerberusPropertyBuilder>): void;
-    /** Référence %property.NAME% dans une valeur. */
-    property(name: string): string;
-
-    /** Builders couvrant les types de propriété Cerberus non dépréciés. */
+interface CerberusPropertyFactory {
     text(value?: string | number): CerberusPropertyBuilder;
     fromJson(path: string): CerberusPropertyBuilder;
     rawFromJson(path: string): CerberusPropertyBuilder;
@@ -163,6 +150,21 @@ interface Cerberus {
     elementPosition(locator: string): CerberusPropertyBuilder;
     otp(secret: string): CerberusPropertyBuilder;
     fromExecutionObject(path: string): CerberusPropertyBuilder;
+}
+
+interface Cerberus {
+    step(description: string, body: () => Promise<void>): Promise<void>;
+    /** Référence un ApplicationObject Cerberus par son nom. */
+    object(name: string): CerberusObjectRef;
+    /** Référence un service Cerberus et déclenche l'action callService. */
+    service(name: string): CerberusServiceRef;
+    /** Référence une DataLib Cerberus dans une valeur. */
+    datalib(name: string): CerberusDataLibRef;
+    /** Déclare les propriétés du testcase au début du test. */
+    properties(definitions: Record<string, string | number | CerberusPropertyDefinition | CerberusPropertyBuilder>): void;
+    /** Référence %property.NAME% dans une valeur. */
+    property(name: string): string;
+
     /** Référence un step de librairie Cerberus sans dupliquer ses actions. */
     libraryStep(ref: CerberusLibraryStepRef): Promise<void>;
     /** Enrichit une action Playwright-like avec les métadonnées d'exécution Cerberus. */
@@ -245,11 +247,11 @@ interface CerberusDataLib {
 declare function test(
     name: string,
     options: CerberusTestOptions,
-    body: (fixtures: { page: CerberusPage; request: CerberusRequest; cerberus: Cerberus }) => Promise<void>
+    body: (fixtures: { page: CerberusPage; request: CerberusRequest; cerberus: Cerberus; property: CerberusPropertyFactory }) => Promise<void>
 ): void;
 declare function test(
     name: string,
-    body: (fixtures: { page: CerberusPage; request: CerberusRequest; cerberus: Cerberus }) => Promise<void>
+    body: (fixtures: { page: CerberusPage; request: CerberusRequest; cerberus: Cerberus; property: CerberusPropertyFactory }) => Promise<void>
 ): void;
 
 // Le code d'action executeJS de Cerberus installe ces propriétés sur la console du navigateur.
