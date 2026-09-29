@@ -1,12 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import { writeDslTypes } from "../dsl/dsl-types.js";
-
-const SCHEMA_SRC = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../schema/cerberus-testcase.schema.json"
-);
 
 const BLOCK_START = "<!-- cerberus:start -->";
 const BLOCK_END = "<!-- cerberus:end -->";
@@ -142,11 +136,7 @@ export function initCommand(opts: InitOptions): void {
     ensureWorkspaceLayout(root, dir);
     console.log("✅ Workspace Cerberus créé (tests, applicationObjects, services, datalib)");
 
-    const schemaDir = path.join(root, dir, ".cerberus");
-    fs.mkdirSync(schemaDir, { recursive: true });
-    fs.copyFileSync(SCHEMA_SRC, path.join(schemaDir, "cerberus-testcase.schema.json"));
-    mergeVscodeSettings(root, `./${dir}/.cerberus/cerberus-testcase.schema.json`, dir);
-    console.log("✅ Schéma installé et associé dans VS Code (extension YAML de Red Hat requise)");
+    fs.mkdirSync(path.join(root, dir, ".cerberus"), { recursive: true });
 
     writeDslTypes(path.join(root, dir));
     console.log(`✅ Types du DSL installés (${dir}/tsconfig.json + ${dir}/.cerberus/cerberus-dsl.d.ts)`);
