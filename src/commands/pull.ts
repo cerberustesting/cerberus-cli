@@ -1,218 +1,151 @@
 import fs from "fs";
 import path from "path";
 import fetch from "node-fetch";
-import crypto from "crypto";
 import YAML from "yaml";
 import { execSync } from "child_process";
 import { loadConfig } from "../config.js";
-
-// Import des vrais types Cerberus
 import {
-    TestCase,
-    TestCaseDetailed,
-    CerberusTestCaseByApplicationResponse,
-    CerberusTestCaseResponse,
+  generateSpec,
+  LocalState,
+  toLocalMetadata,
+  writeLocalTest,
+} from "../dsl/local-format.js";
+import {
+  CerberusTestCaseByApplicationResponse,
+  CerberusTestCaseResponse,
+  TestCaseDetailed,
 } from "../types.js";
 
-/** Hash simple pour comparer le contenu d’un test */
-function hashContent(content: string): string {
-    return crypto.createHash("sha256").update(content).digest("hex");
-}
+function initLocalGitRepo(baseDir: string): void {
+  try {
+    if (!fs.existsSync(path.join(baseDir, ".git"))) {
+      try {
+        execSync("git rev-parse --is-inside-work-tree", { cwd: baseDir, stdio: "ignore" });
+        return;
+      } catch {
+        execSync("git init", { cwd: baseDir, stdio: "ignore" });
+      }
+    }
 
-/** Lecture d’un fichier YAML ou JSON */
-function readTestFile<T>(filePath: string): T | null {
+    execSync("git add .", { cwd: baseDir, stdio: "ignore" });
     try {
-        const content = fs.readFileSync(filePath, "utf8");
-        if (filePath.endsWith(".yaml") || filePath.endsWith(".yml")) {
-            return YAML.parse(content);
-        } else {
-            return JSON.parse(content);
-        }
+      execSync('git commit -m "🧩 Sync Cerberus baseline" --allow-empty', {
+        cwd: baseDir,
+        stdio: "ignore",
+      });
     } catch {
-        return null;
+      // No-op when git identity is missing or there is nothing to commit.
     }
+  } catch (err) {
+    console.warn("⚠️ Impossible d'initialiser la baseline Git :", (err as Error).message);
+  }
 }
 
-/** Écriture d’un fichier YAML */
-function writeTestFile<T>(filePath: string, data: T) {
-    const yaml = YAML.stringify(data);
-    fs.writeFileSync(filePath, yaml, "utf8");
+function isLocallyModified(testDir: string): boolean {
+  const statePath = path.join(testDir, ".cerberus", "state.json");
+  const metadataPath = path.join(testDir, "cerberus.yaml");
+  const specPath = path.join(testDir, "test.spec.ts");
+
+  if (!fs.existsSync(statePath) || !fs.existsSync(metadataPath) || !fs.existsSync(specPath)) {
+    return false;
+  }
+
+  try {
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8")) as LocalState;
+    const expectedMetadata = YAML.stringify(toLocalMetadata(state.serverPayload));
+    const expectedSpec = generateSpec(state.serverPayload);
+    return (
+      fs.readFileSync(metadataPath, "utf8") !== expectedMetadata ||
+      fs.readFileSync(specPath, "utf8") !== expectedSpec
+    );
+  } catch {
+    return true;
+  }
 }
 
-function initLocalGitRepo(baseDir: string) {
-    try {
-        // Dans un dépôt git existant, on laisse le dépôt hôte suivre les changements
-        if (!fs.existsSync(path.join(baseDir, ".git"))) {
-            try {
-                execSync("git rev-parse --is-inside-work-tree", { cwd: baseDir, stdio: "ignore" });
-                console.log("ℹ️  Dossier déjà suivi par le dépôt git du projet, pas de dépôt imbriqué.");
-                return;
-            } catch {
-                // hors dépôt git : on continue
-            }
+export async function pullTests(): Promise<void> {
+  const config = loadConfig();
+  if (!config.application) throw new Error("application manquant dans cerberus.config.json");
 
-            console.log("🌀 Initialisation du dépôt local pour suivi des modifications...");
-            execSync("git init", { cwd: baseDir, stdio: ["ignore", "ignore", "pipe"] });
-        }
+  const outputDir = path.resolve(config.defaultBaseDir);
+  fs.mkdirSync(outputDir, { recursive: true });
 
-        // On ajoute tout et commit pour créer ou mettre à jour la baseline
-        execSync("git add .", { cwd: baseDir, stdio: ["ignore", "ignore", "pipe"] });
+  console.log(`🔄 Récupération des tests depuis ${config.apiUrl}...`);
 
-        try {
-            execSync('git commit -m "🧩 Sync Cerberus baseline" --allow-empty', {
-                cwd: baseDir,
-                stdio: "ignore",
-            });
-        } catch {
-            // Ignore si rien à commit
-        }
+  const listRes = await fetch(`${config.apiUrl}/testcases/application/${config.application}`, {
+    headers: {
+      accept: "application/json",
+      "X-API-KEY": config.apiKey,
+      "X-API-VERSION": config.apiVersion,
+    },
+  });
 
-        // On ajoute un .gitignore (optionnel mais propre)
-        const gitignorePath = path.join(baseDir, ".gitignore");
-        if (!fs.existsSync(gitignorePath)) {
-            fs.writeFileSync(gitignorePath, ".git/\n", "utf8");
-        }
+  if (!listRes.ok) {
+    throw new Error(`Erreur HTTP ${listRes.status}: ${listRes.statusText}`);
+  }
 
-        console.log("✅ Baseline Git initialisée pour suivi des modifications locales.\n");
-    } catch (err) {
-        const stderr = (err as { stderr?: Buffer }).stderr?.toString().trim();
-        console.warn(
-            "⚠️ Impossible d’initialiser le dépôt Git local :",
-            stderr || (err as Error).message
-        );
-    }
-}
+  const json = (await listRes.json()) as CerberusTestCaseByApplicationResponse;
+  if (!Array.isArray(json.data)) throw new Error("Format API inattendu pour la liste des testcases.");
 
-/** Pull complet des tests depuis Cerberus */
-export async function pullTests() {
-    const config = loadConfig();
-    if (!config.application) {
-        console.error("❌ application manquant dans cerberus.config.json !");
-        process.exit(1);
-    }
-    const outputDir = path.resolve(config.defaultBaseDir);
-    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  let conflicted = 0;
 
-    console.log(`🔄 Récupération des tests depuis ${config.apiUrl}...`);
-
-    const listRes = await fetch(`${config.apiUrl}/testcases/application/${config.application}`, {
+  for (const test of json.data) {
+    const testDir = path.join(outputDir, test.testFolderId, test.testcaseId);
+    const detailRes = await fetch(
+      `${config.apiUrl}/testcases/${test.testFolderId}/${test.testcaseId}`,
+      {
         headers: {
-            accept: "application/json",
-            "X-API-KEY": config.apiKey,
-            "X-API-VERSION": config.apiVersion,
+          accept: "application/json",
+          "X-API-KEY": config.apiKey,
+          "X-API-VERSION": config.apiVersion,
         },
-    });
+      }
+    );
 
-    if (!listRes.ok) {
-        console.error("❌ Erreur HTTP:", listRes.status, listRes.statusText);
-        return;
+    if (!detailRes.ok) {
+      console.warn(`⚠️ Impossible de récupérer ${test.testFolderId}/${test.testcaseId}`);
+      continue;
     }
 
-    const json = (await listRes.json()) as CerberusTestCaseByApplicationResponse;
+    const detailJson = (await detailRes.json()) as CerberusTestCaseResponse;
+    const server = detailJson.data as TestCaseDetailed;
+    const statePath = path.join(testDir, ".cerberus", "state.json");
+    const existed = fs.existsSync(statePath);
 
-    if (!json.data || !Array.isArray(json.data)) {
-        console.error("❌ Format inattendu:", json);
-        return;
+    if (existed && isLocallyModified(testDir)) {
+      const state = JSON.parse(fs.readFileSync(statePath, "utf8")) as LocalState;
+      if (String(state.serverPayload.version) === String(server.version)) {
+        console.log(`⚠️ Ignoré (modifié localement) → ${test.testFolderId}/${test.testcaseId}`);
+        skipped++;
+        continue;
+      }
+
+      const conflictFile = path.join(
+        testDir,
+        ".cerberus",
+        `conflict-v${server.version}.json`
+      );
+      fs.mkdirSync(path.dirname(conflictFile), { recursive: true });
+      fs.writeFileSync(conflictFile, JSON.stringify(server, null, 2) + "\n", "utf8");
+      console.warn(`⚠️ Conflit serveur/local → ${conflictFile}`);
+      conflicted++;
+      continue;
     }
 
-    let updated = 0,
-        skipped = 0,
-        conflicted = 0,
-        created = 0;
+    writeLocalTest(testDir, server);
+    existed ? updated++ : created++;
+  }
 
-    // Boucle sur tous les tests
-    for (const test of json.data) {
-        const folderPath = path.join(outputDir, test.testFolderId);
-        if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+  initLocalGitRepo(outputDir);
 
-        const filePath = path.join(folderPath, `${test.testcaseId}.yaml`);
-
-        // Appel du détail du test
-        const detailRes = await fetch(
-            `${config.apiUrl}/testcases/${test.testFolderId}/${test.testcaseId}`,
-            {
-                headers: {
-                    accept: "application/json",
-                    "X-API-KEY": config.apiKey,
-                    "X-API-VERSION": config.apiVersion,
-                },
-            }
-        );
-
-        if (!detailRes.ok) {
-            console.warn(`⚠️  Impossible de récupérer le détail du test ${test.testcaseId}`);
-            continue;
-        }
-
-        const detailJson = (await detailRes.json()) as CerberusTestCaseResponse;
-        const detailedData = detailJson.data as TestCaseDetailed;
-
-        // Vérification de version et hash local
-        if (fs.existsSync(filePath)) {
-            const localRaw = fs.readFileSync(filePath, "utf8");
-            const localData = readTestFile<TestCaseDetailed>(filePath);
-            if (!localData) continue;
-
-            const localHash = hashContent(localRaw);
-            const serverHash = hashContent(YAML.stringify(detailedData));
-
-            if (localData.version === detailedData.version) {
-                if (localHash !== serverHash) {
-                    console.log(`⚠️  Ignoré (modifié localement, même version) → ${filePath}`);
-                    skipped++;
-                    continue;
-                }
-                // même hash = inchangé → mise à jour silencieuse
-                writeTestFile(filePath, detailedData);
-                updated++;
-                continue;
-            }
-
-            // Version différente → conflit
-            if (localHash !== serverHash) {
-                const conflictFile = filePath.replace(
-                    ".yaml",
-                    `.conflict-v${detailedData.version}.yaml`
-                );
-                writeTestFile(conflictFile, detailedData);
-                console.warn(`⚠️  Conflit détecté → ${conflictFile}`);
-                conflicted++;
-                continue;
-            }
-        }
-
-        // Nouveau fichier
-        writeTestFile(filePath, detailedData);
-        created++;
-    }
-
-    // 🔚 Initialisation ou mise à jour du dépôt Git local pour suivi visuel dans l’IDE
-    console.log(`init Repo Git`);
-    initLocalGitRepo(outputDir);
-
-    console.log(`\n✅ Pull terminé :
-    - 🆕 Créés : ${created}
-    - 🔄 Mis à jour : ${updated}
-    - ⚠️ Ignorés (modifiés localement) : ${skipped}
-    - ❗ Conflits : ${conflicted}
-  `);
-}
-
-/** JSON stable pour hashing */
-function stableStringify(obj: any): string {
-    return JSON.stringify(sortKeys(obj), null, 2);
-}
-
-/** Tri récursif des clés d’un objet */
-function sortKeys(obj: any): any {
-    if (Array.isArray(obj)) return obj.map(sortKeys);
-    if (obj && typeof obj === "object") {
-        return Object.keys(obj)
-            .sort()
-            .reduce((acc: any, key) => {
-                acc[key] = sortKeys(obj[key]);
-                return acc;
-            }, {});
-    }
-    return obj;
+  console.log(`
+✅ Pull terminé :
+  - 🆕 Créés : ${created}
+  - 🔄 Mis à jour : ${updated}
+  - ⚠️ Ignorés (modifiés localement) : ${skipped}
+  - ❗ Conflits : ${conflicted}
+`);
 }
