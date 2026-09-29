@@ -45,7 +45,9 @@ function refsFromFolder(config: CerberusConfig, folder: string): Ref[] {
         if (entry.name.startsWith(".")) continue;
 
         if (entry.isDirectory()) {
-            const metadataPath = path.join(dir, entry.name, "header.yaml");
+            const testDir = path.join(dir, entry.name);
+            migrateLegacyTestLayout(testDir);
+            const metadataPath = path.join(testDir, "header.yaml");
             if (!fs.existsSync(metadataPath)) continue;
 
             const data = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
