@@ -50,7 +50,7 @@ function existingTestDir(outputDir: string, testFolderId: string, testcaseId: st
 
   for (const entry of fs.readdirSync(folderDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-    const metadataPath = path.join(folderDir, entry.name, "cerberus.yaml");
+    const metadataPath = path.join(folderDir, entry.name, "header.yaml");
     if (!fs.existsSync(metadataPath)) continue;
     try {
       const metadata = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
@@ -122,7 +122,7 @@ export async function pullTests(): Promise<void> {
 
     const detailJson = (await detailRes.json()) as CerberusTestCaseResponse;
     const server = detailJson.data as TestCaseDetailed;
-    const statePath = path.join(testDir, ".cerberus", "state.json");
+    const statePath = path.join(testDir, ".sync", "baseline.json");
     const existed = fs.existsSync(statePath);
 
     if (existed && isLocallyModified(testDir)) {
@@ -135,7 +135,7 @@ export async function pullTests(): Promise<void> {
 
       const conflictFile = path.join(
         testDir,
-        ".cerberus",
+        ".sync",
         `conflict-v${server.version}.json`
       );
       fs.mkdirSync(path.dirname(conflictFile), { recursive: true });
