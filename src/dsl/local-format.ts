@@ -241,25 +241,78 @@ export function toLocalMetadata(test: TestCaseDetailed): LocalMetadata {
   };
 }
 
+const PROPERTY_FACTORY_BY_TYPE: Record<string, string> = {
+  text: "text",
+  getFromJson: "fromJson",
+  getRawFromJson: "rawFromJson",
+  getFromSql: "fromSql",
+  getFromDataLib: "fromDataLib",
+  getFromJS: "fromJS",
+  getFromXml: "fromXml",
+  getRawFromXml: "rawFromXml",
+  getDifferencesFromXml: "differencesFromXml",
+  getFromHtml: "fromHtml",
+  getFromHtmlVisible: "fromHtmlVisible",
+  getAttributeFromHtml: "attributeFromHtml",
+  getFromCookie: "fromCookie",
+  getFromNetworkTraffic: "fromNetworkTraffic",
+  getFromGroovy: "fromGroovy",
+  getFromCommand: "fromCommand",
+  getElementPosition: "elementPosition",
+  getOTP: "otp",
+  getFromExecutionObject: "fromExecutionObject",
+};
+
+const PROPERTY_TYPE_BY_FACTORY = Object.fromEntries(
+  Object.entries(PROPERTY_FACTORY_BY_TYPE).map(([type, factory]) => [factory, type])
+) as Record<string, string>;
+
+function normalizedNature(value: unknown): string | undefined {
+  if (!hasText(value)) return undefined;
+  const nature = String(value).toUpperCase();
+  return nature === "NOTINUSE" ? "NOTINUSE" : nature;
+}
+
 function renderPropertyDefinition(property: NonNullable<TestCaseDetailed["properties"]>[number]): string {
   const type = String(property.type ?? "text");
-  const value1 = property.value1 ?? "";
-
-  if (type === "text") return literal(value1);
-  if (type === "getFromDataLib") return `cerberus.fromDataLib(${literal(value1)})`;
-  if (type === "getFromJS" && !hasText(value1) && !hasText(property.value2) && !hasText(property.value3)) {
-    return "cerberus.fromJS()";
+  const factory = PROPERTY_FACTORY_BY_TYPE[type];
+  if (!factory) {
+    const detail: Record<string, unknown> = { type };
+    for (const key of ["value1", "value2", "value3", "database", "length", "rowLimit", "nature", "rank", "retryNb", "retryPeriod", "cacheExpire", "description"] as const) {
+      const value = property[key];
+      if (value !== undefined && value !== null && String(value) !== "") detail[key] = value;
+    }
+    return JSON.stringify(detail);
   }
 
-  const detail: Record<string, unknown> = { type };
-  if (hasText(property.value1)) detail.value1 = property.value1;
-  if (hasText(property.value2)) detail.value2 = property.value2;
-  if (hasText(property.value3)) detail.value3 = property.value3;
-  if (hasText(property.length)) detail.length = property.length;
-  if (property.rowLimit !== undefined && property.rowLimit !== null) detail.rowLimit = property.rowLimit;
-  if (hasText(property.nature)) detail.nature = property.nature;
-  if (property.rank !== undefined && property.rank !== null) detail.rank = property.rank;
-  return JSON.stringify(detail);
+  const args =
+    type === "text"
+      ? (hasText(property.value1) ? literal(property.value1) : "")
+      : (hasText(property.value1) ? literal(property.value1) : "");
+  let expression = `cerberus.${factory}(${args})`;
+
+  const modifiers: Array<[string, unknown]> = [
+    ["value2", property.value2],
+    ["value3", property.value3],
+    ["database", property.database],
+    ["length", property.length],
+    ["rowLimit", property.rowLimit],
+    ["nature", normalizedNature(property.nature)],
+    ["rank", property.rank],
+    ["retryNb", property.retryNb],
+    ["retryPeriod", property.retryPeriod],
+    ["cacheExpire", property.cacheExpire],
+    ["description", property.description],
+  ];
+
+  for (const [method, value] of modifiers) {
+    if (value === undefined || value === null || String(value) === "") continue;
+    if (["rowLimit", "rank", "retryNb", "retryPeriod", "cacheExpire"].includes(method) && Number(value) === 0) continue;
+    if (method === "nature" && String(value).toUpperCase() === "STATIC") continue;
+    expression += `.${method}(${literal(value)})`;
+  }
+
+  return expression;
 }
 
 function renderProperties(test: TestCaseDetailed): string[] {
@@ -785,6 +838,56 @@ function propertyTemplate(original: TestCaseDetailed, name: string, index: numbe
   };
 }
 
+function parsePropertyBuilder(
+  expression: ts.Expression
+): { type: string; values: Record<string, unknown> } | undefined {
+  const values: Record<string, unknown> = {};
+
+  const walk = (node: ts.Expression): { factory: string; args: ts.NodeArray<ts.Expression> } | undefined => {
+    if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return undefined;
+
+    const receiver = node.expression.expression;
+    const method = node.expression.name.text;
+
+    if (
+      ts.isIdentifier(receiver) &&
+      receiver.text === "cerberus" &&
+      PROPERTY_TYPE_BY_FACTORY[method]
+    ) {
+      return { factory: method, args: node.arguments };
+    }
+
+    if (ts.isCallExpression(receiver)) {
+      const base = walk(receiver);
+      if (!base) return undefined;
+
+      const arg = node.arguments[0];
+      if (arg) {
+        const parsed = parseLiteral(arg);
+        if (parsed !== undefined) values[method] = parsed;
+      }
+      return base;
+    }
+
+    return undefined;
+  };
+
+  const base = walk(expression);
+  if (!base) return undefined;
+
+  const type = PROPERTY_TYPE_BY_FACTORY[base.factory];
+  const first = base.args[0];
+  if (first) {
+    const value = parseLiteral(first);
+    if (value !== undefined) values.value1 = String(value);
+  } else if (type === "text") {
+    values.value1 = "";
+  }
+
+  if (values.nature !== undefined) values.nature = normalizedNature(values.nature);
+  return { type, values };
+}
+
 function parsePropertyDefinition(
   name: string,
   expression: ts.Expression,
@@ -799,25 +902,24 @@ function parsePropertyDefinition(
     return { ...base, type: "text", value1: expression.text };
   }
 
-  if (
-    ts.isCallExpression(expression) &&
-    ts.isPropertyAccessExpression(expression.expression) &&
-    ts.isIdentifier(expression.expression.expression) &&
-    expression.expression.expression.text === "cerberus"
-  ) {
-    const method = expression.expression.name.text;
-    if (method === "fromDataLib") {
-      const value = stringArg(expression, 0);
-      if (!value) {
-        issues.push({ file: source.fileName, line: sourceLine(source, expression), message: `Property ${name}: cerberus.fromDataLib() requires a literal DataLib name.` });
-        return undefined;
-      }
-      return { ...base, type: "getFromDataLib", value1: value };
+  const builder = parsePropertyBuilder(expression);
+  if (builder) {
+    const value1 = builder.values.value1;
+    if (builder.type !== "text" && (!hasText(value1))) {
+      issues.push({
+        file: source.fileName,
+        line: sourceLine(source, expression),
+        message: `Property ${name}: ${builder.type} requires a literal primary value.`,
+      });
+      return undefined;
     }
-    if (method === "fromJS") {
-      const value = stringArg(expression, 0) ?? "";
-      return { ...base, type: "getFromJS", value1: value };
-    }
+
+    return {
+      ...base,
+      ...builder.values,
+      property: name,
+      type: builder.type,
+    } as NonNullable<TestCaseDetailed["properties"]>[number];
   }
 
   if (ts.isObjectLiteralExpression(expression)) {
