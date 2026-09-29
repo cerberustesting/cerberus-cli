@@ -1,8 +1,7 @@
 import fs from "fs";
 import path from "path";
-import YAML from "yaml";
 import type { CerberusConfig } from "./config.js";
-import { generateSpec, LocalState, toLocalMetadata } from "./dsl/local-format.js";
+import { generateSpec, LocalState } from "./dsl/local-format.js";
 import type { CerberusTestCaseResponse, TestCaseDetailed } from "./types.js";
 
 /** Champs propres au serveur : ignorés quand on compare deux versions d'un même élément. */
@@ -45,16 +44,12 @@ export function readState(testDir: string): LocalState | null {
 
 /** Les fichiers locaux diffèrent-ils de ce que produirait le dernier état synchronisé (baseline.json) ? */
 export function isLocallyModified(testDir: string): boolean {
-    const metadataPath = path.join(testDir, "header.yaml");
-    const specPath = path.join(testDir, "script.ts");
-    if (!fs.existsSync(metadataPath) || !fs.existsSync(specPath)) return false;
+    const testcasePath = path.join(testDir, "testcase.ts");
+    if (!fs.existsSync(testcasePath)) return false;
     const state = readState(testDir);
-    if (!state) return fs.existsSync(metadataPath) && fs.existsSync(specPath);
+    if (!state) return true;
     try {
-        return (
-            fs.readFileSync(metadataPath, "utf8") !== YAML.stringify(toLocalMetadata(state.serverPayload)) ||
-            fs.readFileSync(specPath, "utf8") !== generateSpec(state.serverPayload)
-        );
+        return fs.readFileSync(testcasePath, "utf8") !== generateSpec(state.serverPayload);
     } catch {
         return true;
     }
@@ -338,17 +333,11 @@ export function selectTestDirs(allDirs: string[], refs: string[]): string[] {
         }
 
         const byMetadata = allDirs.find((d) => {
-            const metadataPath = path.join(d, "header.yaml");
-            if (!fs.existsSync(metadataPath)) return false;
-            try {
-                const metadata = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
-                return (
-                    String(metadata.testFolder ?? metadata.testFolderId ?? "") === wantedFolder &&
-                    String(metadata.testcase ?? metadata.testcaseId ?? "") === wantedTestcase
-                );
-            } catch {
-                return false;
-            }
+            const state = readState(d);
+            return !!state && (
+                String(state.serverPayload.testFolderId) === wantedFolder &&
+                String(state.serverPayload.testcaseId) === wantedTestcase
+            );
         });
 
         if (!byMetadata) {
