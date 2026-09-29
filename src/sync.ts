@@ -113,25 +113,32 @@ export async function fetchServerTest(
 }
 
 /**
- * Le GET public omet les tableaux vides (bugs, conditionOptions, options) et une action créée localement
- * ne les a jamais ; or le serveur appelle .toString() dessus à l'insertion et plante (NPE) s'ils manquent.
- * On les complète avec [] dans le corps envoyé, sans toucher aux fichiers locaux.
+ * Le GET public omet les valeurs vides (tableaux bugs/conditionOptions/options, textes description/value1..3) et une
+ * action créée localement ne les a jamais ; or le serveur plante (NPE, ou colonne NOT NULL) s'ils manquent.
+ * On les complète avec [] ou "" dans le corps envoyé, sans toucher aux fichiers locaux.
  */
 export function withRequiredDefaults<T extends TestCaseDetailed>(test: T): T {
     const arr = (v: unknown) => (v == null ? [] : v);
+    const str = (v: unknown) => (v == null ? "" : v);
+    // colonnes texte NOT NULL côté base : le GET omet les valeurs vides, l'insertion/mise à jour plante sans elles
+    const texts = (o: any, keys: string[]) => Object.fromEntries(keys.map((k) => [k, str(o[k])]));
+    const CONDITIONS = ["conditionValue1", "conditionValue2", "conditionValue3"];
     return {
         ...test,
         bugs: arr((test as any).bugs),
         conditionOptions: arr((test as any).conditionOptions),
         steps: (test.steps ?? []).map((step) => ({
             ...step,
+            ...texts(step, ["description", ...CONDITIONS]),
             conditionOptions: arr((step as any).conditionOptions),
             actions: (step.actions ?? []).map((action) => ({
                 ...action,
+                ...texts(action, ["description", "value1", "value2", "value3", ...CONDITIONS]),
                 conditionOptions: arr((action as any).conditionOptions),
                 options: arr((action as any).options),
                 controls: (action.controls ?? []).map((control) => ({
                     ...control,
+                    ...texts(control, ["description", "value1", "value2", "value3", ...CONDITIONS]),
                     conditionOptions: arr((control as any).conditionOptions),
                     options: arr((control as any).options),
                 })),
@@ -209,6 +216,54 @@ export function summarize(t: TestCaseDetailed): Summary {
     };
 }
 
+const STEP_FIELDS = ["description", "sort", "loop", "conditionOperator", "isUsingLibraryStep"];
+const ACTION_FIELDS = [
+    "sort", "action", "value1", "value2", "value3", "description", "conditionOperator",
+    "isFatal", "doScreenshotBefore", "doScreenshotAfter", "waitBefore", "waitAfter",
+];
+const CONTROL_FIELDS = [
+    "sort", "control", "value1", "value2", "value3", "description", "conditionOperator",
+    "isFatal", "doScreenshotBefore", "doScreenshotAfter", "waitBefore", "waitAfter",
+];
+
+/** Champs envoyés (non vides) dont la valeur diffère sur le serveur : une mise à jour ignorée n'a pas de code d'erreur. */
+function fieldDiffs(where: string, sent: any, got: any, fields: string[]): string[] {
+    const out: string[] = [];
+    for (const f of fields) {
+        const a = canon({ v: sent?.[f] }) as { v?: unknown };
+        if (a.v === undefined) continue; // vide côté envoi : valeur par défaut du serveur acceptée
+        const b = canon({ v: got?.[f] }) as { v?: unknown };
+        if (JSON.stringify(a.v) !== JSON.stringify(b.v)) {
+            out.push(`${where}, ${f} : envoyé ${JSON.stringify(sent[f])}, serveur ${JSON.stringify(got?.[f] ?? null)}`);
+        }
+    }
+    return out;
+}
+
+/** Compare le contenu des étapes, actions et contrôles (par identifiant). */
+function contentProblems(sent: TestCaseDetailed, got: TestCaseDetailed): string[] {
+    const out: string[] = [];
+    for (const step of sent.steps ?? []) {
+        const gs = (got.steps ?? []).find((x) => x.stepId === step.stepId);
+        const sw = `étape ${step.stepId}`;
+        if (!gs) { out.push(`${sw} absente du serveur`); continue; }
+        out.push(...fieldDiffs(sw, step, gs, STEP_FIELDS));
+        for (const action of step.actions ?? []) {
+            const ga = (gs.actions ?? []).find((x) => x.actionId === action.actionId);
+            const aw = `action ${step.stepId}.${action.actionId} (${action.action})`;
+            if (!ga) { out.push(`${aw} absente du serveur`); continue; }
+            out.push(...fieldDiffs(aw, action, ga, ACTION_FIELDS));
+            for (const control of action.controls ?? []) {
+                const gc = (ga.controls ?? []).find((x) => x.controlId === control.controlId);
+                const cw = `contrôle ${step.stepId}.${action.actionId}.${control.controlId} (${control.control})`;
+                if (!gc) { out.push(`${cw} absent du serveur`); continue; }
+                out.push(...fieldDiffs(cw, control, gc, CONTROL_FIELDS));
+            }
+        }
+    }
+    return out;
+}
+
 /** Écarts entre ce qui a été envoyé et ce que le serveur renvoie ensuite. Vide = push fidèle. */
 export function verifyPush(sent: TestCaseDetailed, got: TestCaseDetailed): string[] {
     const a = summarize(sent);
@@ -234,7 +289,9 @@ export function verifyPush(sent: TestCaseDetailed, got: TestCaseDetailed): strin
             problems.push(`${k} : envoyé ${JSON.stringify(a.header[k])}, serveur ${JSON.stringify(b.header[k])}`);
         }
     }
-    return problems;
+    problems.push(...contentProblems(sent, got));
+    const MAX = 12;
+    return problems.length > MAX ? [...problems.slice(0, MAX), `… et ${problems.length - MAX} autre(s) écart(s)`] : problems;
 }
 
 /** Ligne de résumé pour --dry-run : ce qui diffère entre l'état de départ et le local. */

@@ -565,6 +565,50 @@ function parseLibraryStepCall(
   };
 }
 
+/**
+ * Les actions et contrôles créés dans le DSL n'ont pas d'identifiants. Or le serveur identifie chaque élément par sa
+ * propre clé (dossier, testcase, stepId, actionId, controlId) et ne la déduit pas du parent : une action à
+ * stepId 0 / actionId 0 serait insérée dans un step inexistant et disparaîtrait. On complète donc les clés manquantes,
+ * sans jamais changer celles qui existent déjà.
+ */
+function nextFree(used: Set<number>): number {
+  let id = Math.max(0, ...used) + 1;
+  while (used.has(id)) id++;
+  used.add(id);
+  return id;
+}
+
+function assignIdentifiers(steps: TestCaseStep[], original: TestCaseDetailed): void {
+  const usedSteps = new Set<number>();
+  for (const step of steps) {
+    step.testFolderId = step.testFolderId || original.testFolderId;
+    step.testcaseId = step.testcaseId || original.testcaseId;
+    if (step.stepId > 0 && !usedSteps.has(step.stepId)) usedSteps.add(step.stepId);
+    else step.stepId = nextFree(usedSteps);
+  }
+
+  for (const step of steps) {
+    const usedActions = new Set<number>();
+    for (const action of step.actions ?? []) {
+      action.testFolderId = action.testFolderId || original.testFolderId;
+      action.testcaseId = action.testcaseId || original.testcaseId;
+      action.stepId = step.stepId;
+      if (action.actionId > 0 && !usedActions.has(action.actionId)) usedActions.add(action.actionId);
+      else action.actionId = nextFree(usedActions);
+
+      const usedControls = new Set<number>();
+      for (const control of action.controls ?? []) {
+        control.testFolderId = control.testFolderId || original.testFolderId;
+        control.testcaseId = control.testcaseId || original.testcaseId;
+        control.stepId = action.stepId;
+        control.actionId = action.actionId;
+        if (control.controlId > 0 && !usedControls.has(control.controlId)) usedControls.add(control.controlId);
+        else control.controlId = nextFree(usedControls);
+      }
+    }
+  }
+}
+
 export function parseSpec(
   specPath: string,
   original: TestCaseDetailed
@@ -613,7 +657,11 @@ export function parseSpec(
         return;
       }
 
-      const originalStep = original.steps?.[steps.length];
+      // generateSpec écrit les actions triées par sort : les identifiants d'origine doivent être relus dans le même ordre
+      const rawStep = original.steps?.[steps.length];
+      const originalStep = rawStep
+        ? { ...rawStep, actions: [...(rawStep.actions ?? [])].sort((a, b) => Number(a.sort) - Number(b.sort)) }
+        : undefined;
       const actions: TestAction[] = [];
 
       for (const statement of callback.body.statements) {
@@ -782,6 +830,7 @@ export function parseSpec(
     });
   }
 
+  assignIdentifiers(steps, original);
   return { steps, issues };
 }
 
