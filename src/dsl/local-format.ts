@@ -316,6 +316,15 @@ function renderPropertyDefinition(property: NonNullable<TestCaseDetailed["proper
     expression += `.${method}(${rendered})`;
   }
 
+  const countries = (property.countries ?? [])
+    .map((country) => String(country.value ?? "").trim())
+    .filter(Boolean);
+  if (countries.length === 1) {
+    expression += `.country(${literal(countries[0])})`;
+  } else if (countries.length > 1) {
+    expression += `.countries(${countries.map((country) => literal(country)).join(", ")})`;
+  }
+
   return expression;
 }
 
@@ -865,6 +874,15 @@ function parsePropertyBuilder(
       const base = walk(receiver);
       if (!base) return undefined;
 
+      if (method === "country" || method === "countries") {
+        const countries = node.arguments
+          .map((arg) => parseLiteral(arg))
+          .filter((value): value is string | number | boolean => value !== undefined)
+          .map((value) => String(value));
+        values.countries = countries;
+        return base;
+      }
+
       const arg = node.arguments[0];
       if (arg) {
         const parsed = parseLiteral(arg);
@@ -937,9 +955,21 @@ function parsePropertyDefinition(
       return undefined;
     }
 
+    const countryValues = Array.isArray(builder.values.countries)
+      ? builder.values.countries.map((value) => String(value))
+      : undefined;
+    const countries = countryValues
+      ? countryValues.map((value) =>
+          (base.countries ?? []).find((country) => String(country.value) === value) ?? { value }
+        )
+      : base.countries;
+
+    const { countries: _countries, ...builderValues } = builder.values;
+
     return {
       ...base,
-      ...builder.values,
+      ...builderValues,
+      countries,
       property: name,
       type: builder.type,
     } as NonNullable<TestCaseDetailed["properties"]>[number];
