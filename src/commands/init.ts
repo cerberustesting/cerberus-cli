@@ -14,6 +14,7 @@ const BLOCK_END = "<!-- cerberus:end -->";
 export interface InitOptions {
     apiUrl: string;
     application?: string;
+    system?: string;
     dir: string;
     force?: boolean;
 }
@@ -38,13 +39,13 @@ Pour un testcase :
 - \`${dir}/.cerberus/cerberus-dsl.d.ts\` et \`${dir}/tsconfig.json\` : types du DSL pour l'IDE.
 
 Commandes :
-- \`cerberus pull\` : télécharge et convertit les tests vers le format local.
+- \`cerberus pull\` : synchronise les testcases, applicationObjects, services, datalib et labels vers le workspace local.
 - \`cerberus prepare [dossier/id ...]\` : analyse un test Playwright avant Cerberusification. Il signale les actions hors
   \`cerberus.step(...)\`, le nombre d'actions enrichies avec \`cerberus.do(...)\` et les descriptions. \`--json\`
   fournit un diagnostic exploitable par une IA. Cette commande ne modifie jamais le test.
 - \`cerberus validate\` : valide le DSL avant push. Un Playwright pur peut servir de brouillon, mais \`validate\` bloque tant
   qu'il reste des actions hors \`cerberus.step(...)\`.
-- \`cerberus push [dossier/id ...]\` : envoie les tests modifiés localement, avec garde-fous. Si le testcase n'existe pas encore, il le crée via l'API publique puis relit et vérifie le résultat. S'il existe, il refuse si le serveur a changé depuis
+- \`cerberus push [dossier/id ...]\` : sans référence, pousse les tests et ressources modifiés du workspace ; avec une référence testcase, ne pousse que ce testcase. Garde-fous : Si le testcase n'existe pas encore, il le crée via l'API publique puis relit et vérifie le résultat. S'il existe, il refuse si le serveur a changé depuis
   le dernier pull (utiliser \`merge\`), sauvegarde l'état serveur dans \`.cerberus/backups/\` avant l'envoi, puis relit le testcase et
   échoue si pays, propriétés ou étapes diffèrent. Options : \`--dry-run\`, \`--all\`, \`--force\` (écrase le serveur, à éviter).
 - \`cerberus merge [dossier/id ...]\` : fusion à trois voies (dernier pull, local, serveur). Les conflits ne sont jamais tranchés
@@ -160,6 +161,7 @@ export function initCommand(opts: InitOptions): void {
             apiVersion: "1",
             defaultBaseDir: `./${dir}`,
             ...(opts.application ? { application: opts.application } : {}),
+            ...(opts.system ? { system: opts.system } : {}),
         };
         fs.writeFileSync(configFile, JSON.stringify(config, null, 2) + "\n", "utf8");
         console.log("✅ cerberus.config.json créé");
