@@ -1,13 +1,10 @@
 import { loadConfig, testsDir } from "../config.js";
 import { findLocalTestDirs, readLocalTest } from "../dsl/local-format.js";
+import { validateResources } from "../resources.js";
 
 export async function validateCommand(): Promise<void> {
   const config = loadConfig();
   const testDirs = findLocalTestDirs(testsDir(config));
-
-  if (testDirs.length === 0) {
-    throw new Error("Aucun testcase local à valider.");
-  }
 
   let errors = 0;
 
@@ -31,9 +28,15 @@ export async function validateCommand(): Promise<void> {
     }
   }
 
+  const resourceIssues = validateResources(config);
+  for (const issue of resourceIssues) {
+    console.error(`❌ ${issue}`);
+  }
+  errors += resourceIssues.length;
+
   if (errors > 0) {
     throw new Error(`${errors} erreur(s) de validation.`);
   }
 
-  console.log(`\n✅ ${testDirs.length} testcase(s) valide(s).`);
+  console.log(`\n✅ Validation terminée : ${testDirs.length} testcase(s) + ressources workspace valides.`);
 }
