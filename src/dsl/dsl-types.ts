@@ -92,12 +92,19 @@ interface CerberusServiceRef {
     call(options?: CerberusServiceCallOptions): Promise<void>;
 }
 
+interface CerberusDataLibRef {
+    /** Référence directe à %datalib.NAME.SUBDATA%. */
+    value(subData: string): string;
+}
+
 interface Cerberus {
     step(description: string, body: () => Promise<void>): Promise<void>;
     /** Référence un ApplicationObject Cerberus par son nom. */
     object(name: string): CerberusObjectRef;
     /** Référence un service Cerberus et déclenche l'action callService. */
     service(name: string): CerberusServiceRef;
+    /** Référence une DataLib Cerberus dans une valeur. */
+    datalib(name: string): CerberusDataLibRef;
     /** Référence un step de librairie Cerberus sans dupliquer ses actions. */
     libraryStep(ref: CerberusLibraryStepRef): Promise<void>;
     /** Enrichit une action Playwright-like avec les métadonnées d'exécution Cerberus. */
