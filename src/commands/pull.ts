@@ -4,6 +4,7 @@ import YAML from "yaml";
 import { execSync } from "child_process";
 import { loadConfig, testsDir, workspaceDir } from "../config.js";
 import { isLocallyModified } from "../sync.js";
+import { pullResources } from "../resources.js";
 import { writeDslTypes } from "../dsl/dsl-types.js";
 import {
   generateSpec,
@@ -148,10 +149,12 @@ export async function pullTests(): Promise<void> {
     existed ? updated++ : created++;
   }
 
+  await pullResources(config);
+
   initLocalGitRepo(workspace);
 
   console.log(`
-✅ Pull terminé :
+✅ Pull tests terminé :
   - 🆕 Créés : ${created}
   - 🔄 Mis à jour : ${updated}
   - ⚠️ Ignorés (modifiés localement) : ${skipped}
