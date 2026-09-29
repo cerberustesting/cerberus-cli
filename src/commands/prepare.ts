@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import ts from "typescript";
-import { loadConfig } from "../config.js";
+import { loadConfig, testsDir } from "../config.js";
 import { findLocalTestDirs } from "../dsl/local-format.js";
 import { selectTestDirs } from "../sync.js";
 
@@ -185,7 +185,7 @@ function analyzeSpec(testDir: string): PrepareReport {
 
 export async function prepareCommand(refs: string[], opts: PrepareOptions): Promise<number> {
   const config = loadConfig();
-  const allDirs = findLocalTestDirs(config.defaultBaseDir);
+  const allDirs = findLocalTestDirs(testsDir(config));
   if (allDirs.length === 0) {
     throw new Error("Aucun testcase local trouvé. Lancez 'pull' ou créez d'abord le dossier du testcase.");
   }
