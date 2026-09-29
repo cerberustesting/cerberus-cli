@@ -86,12 +86,20 @@ export interface TestCaseStep {
 
 /** Pays associé à un cas de test */
 export interface TestCaseCountry {
-    idName: string;
+    idName?: string;
     value: string;
-    sort: number;
-    description: string;
+    sort?: number;
+    description?: string;
+    shortDescription?: string;
     attribute1?: string;
     attribute2?: string;
+    attribute3?: string;
+    attribute4?: string;
+    attribute5?: string;
+    attribute6?: string;
+    attribute7?: string;
+    attribute8?: string;
+    attribute9?: string;
 }
 
 /** Propriété liée à un cas de test (avec éventuelles localisations par pays) */
