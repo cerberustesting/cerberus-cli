@@ -130,12 +130,17 @@ export async function putServerTest(config: CerberusConfig, test: TestCaseDetail
 }
 
 export async function createServerTest(config: CerberusConfig, test: TestCaseDetailed): Promise<Response> {
+    // À la création, l'identifiant du testcase est toujours attribué par Cerberus.
+    // Le nom/ID local éventuel n'est qu'un identifiant provisoire de travail et ne doit
+    // jamais imposer une valeur qui pourrait déjà être utilisée dans le test folder.
+    const { testcaseId: _localDraftId, ...creationPayload } = test;
+
     return fetch(`${config.apiUrl}/testcases`, {
         method: "POST",
         redirect: "manual",
         headers: await baseHeaders(config, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-            ...test,
+            ...creationPayload,
             version: Number(test.version ?? 0),
             bugs: (test as any).bugs ?? [],
             conditionOptions: (test as any).conditionOptions ?? [],
