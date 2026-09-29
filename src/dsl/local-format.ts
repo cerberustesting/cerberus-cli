@@ -408,12 +408,12 @@ export function localTestDirName(test: Pick<TestCaseDetailed, "testcaseId" | "de
 }
 
 export function writeLocalTest(testDir: string, test: TestCaseDetailed): void {
-  fs.mkdirSync(path.join(testDir, ".cerberus"), { recursive: true });
-  fs.writeFileSync(path.join(testDir, "cerberus.yaml"), YAML.stringify(toLocalMetadata(test)), "utf8");
-  fs.writeFileSync(path.join(testDir, "test.spec.ts"), generateSpec(test), "utf8");
+  fs.mkdirSync(path.join(testDir, ".sync"), { recursive: true });
+  fs.writeFileSync(path.join(testDir, "header.yaml"), YAML.stringify(toLocalMetadata(test)), "utf8");
+  fs.writeFileSync(path.join(testDir, "script.ts"), generateSpec(test), "utf8");
   const state: LocalState = { formatVersion: 1, serverPayload: test };
   fs.writeFileSync(
-    path.join(testDir, ".cerberus", "state.json"),
+    path.join(testDir, ".sync", "baseline.json"),
     JSON.stringify(state, null, 2) + "\n",
     "utf8"
   );
@@ -1395,9 +1395,9 @@ function draftStateFromMetadata(testDir: string, metadata: LocalMetadata): Local
 }
 
 export function readLocalTest(testDir: string): { data: TestCaseDetailed; issues: ValidationIssue[] } {
-  const metadataPath = path.join(testDir, "cerberus.yaml");
-  const specPath = path.join(testDir, "test.spec.ts");
-  const statePath = path.join(testDir, ".cerberus", "state.json");
+  const metadataPath = path.join(testDir, "header.yaml");
+  const specPath = path.join(testDir, "script.ts");
+  const statePath = path.join(testDir, ".sync", "baseline.json");
 
   if (!fs.existsSync(metadataPath)) throw new Error(`Missing ${metadataPath}`);
   if (!fs.existsSync(specPath)) throw new Error(`Missing ${specPath}`);
@@ -1452,8 +1452,8 @@ export function findLocalTestDirs(baseDir: string): string[] {
 
       const testDir = path.join(folderPath, testcase.name);
       if (
-        fs.existsSync(path.join(testDir, "cerberus.yaml")) &&
-        fs.existsSync(path.join(testDir, "test.spec.ts"))
+        fs.existsSync(path.join(testDir, "header.yaml")) &&
+        fs.existsSync(path.join(testDir, "script.ts"))
       ) {
         result.push(testDir);
       }
