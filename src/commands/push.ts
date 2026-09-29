@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { loadConfig, testsDir } from "../config.js";
 import { findLocalTestDirs, localTestDirName, readLocalTest, writeLocalTest } from "../dsl/local-format.js";
+import { pushResources } from "../resources.js";
 import {
   backupServerState,
   createServerTest,
@@ -40,13 +41,14 @@ export async function pushCommand(refs: string[], opts: PushOptions): Promise<nu
   const baseDir = testsDir(config);
 
   if (!fs.existsSync(baseDir)) {
-    throw new Error(`Le dossier ${baseDir} n'existe pas. Lancez 'pull' d'abord.`);
+    fs.mkdirSync(baseDir, { recursive: true });
   }
   const allDirs = findLocalTestDirs(baseDir);
-  if (allDirs.length === 0) throw new Error("Aucun testcase au format local. Lancez 'pull' d'abord.");
-
-  const dirs = selectTestDirs(allDirs, refs);
   const explicit = refs.length > 0;
+  if (explicit && allDirs.length === 0) throw new Error("Aucun testcase au format local. Lancez 'pull' d'abord.");
+  const dirs = selectTestDirs(allDirs, refs);
+
+  const resourceCode = explicit ? 0 : await pushResources(config, opts);
 
   let pushed = 0;
   let unchanged = 0;
@@ -242,5 +244,5 @@ export async function pushCommand(refs: string[], opts: PushOptions): Promise<nu
   if (blocked) parts.push(`${blocked} bloqué(s) (serveur modifié)`);
   if (failed) parts.push(`${failed} en erreur`);
   console.log(`\n${blocked || failed ? "❗" : "✅"} Push terminé : ${parts.join(", ")}.`);
-  return blocked || failed ? 1 : 0;
+  return resourceCode || blocked || failed ? 1 : 0;
 }
