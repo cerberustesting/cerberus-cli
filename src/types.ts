@@ -70,6 +70,8 @@ export interface TestCaseStep {
     conditionOperator: string;
     description?: string;
     isUsingLibraryStep: boolean;
+    libraryStepTestFolderId?: string;
+    libraryStepTestcaseId?: string;
     libraryStepStepId: number;
     isStepInUseByOtherTestcase: boolean;
     libraryStepSort: number;
