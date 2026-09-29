@@ -1,7 +1,8 @@
 import fs from "fs";
 import path from "path";
-import YAML from "yaml";
 import { loadConfig, CerberusConfig, testsDir } from "../config.js";
+import { migrateLegacyTestLayout } from "../dsl/local-format.js";
+import { readState } from "../sync.js";
 import { ExecutionResult, toJUnit, verdictOf } from "../junit.js";
 
 export interface RunOptions {
@@ -40,36 +41,19 @@ function refsFromFolder(config: CerberusConfig, folder: string): Ref[] {
     if (!fs.existsSync(dir)) throw new Error(`Dossier local introuvable : ${dir}`);
 
     const refs: Ref[] = [];
-
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (entry.name.startsWith(".")) continue;
+        if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+        const testDir = path.join(dir, entry.name);
+        migrateLegacyTestLayout(testDir);
+        if (!fs.existsSync(path.join(testDir, "testcase.ts"))) continue;
 
-        if (entry.isDirectory()) {
-            const testDir = path.join(dir, entry.name);
-            migrateLegacyTestLayout(testDir);
-            const testcasePath = path.join(testDir, "testcase.ts");
-            if (!fs.existsSync(testcasePath)) continue;
-
-            const data = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
-            refs.push({
-                testFolderId: data.testFolder ?? data.testFolderId ?? folder,
-                testcaseId: data.testcase ?? data.testcaseId ?? entry.name,
-            });
-            continue;
-        }
-
-        if (entry.isFile() && /\.ya?ml$/.test(entry.name) && !entry.name.includes(".conflict-")) {
-            const data = YAML.parse(fs.readFileSync(path.join(dir, entry.name), "utf8"));
-            refs.push({
-                testFolderId: data.testFolderId ?? data.testFolder ?? folder,
-                testcaseId:
-                    data.testcaseId ??
-                    data.testcase ??
-                    entry.name.replace(/\.ya?ml$/, ""),
-            });
-        }
+        const state = readState(testDir);
+        if (!state) continue;
+        refs.push({
+            testFolderId: state.serverPayload.testFolderId || folder,
+            testcaseId: state.serverPayload.testcaseId,
+        });
     }
-
     return refs;
 }
 
