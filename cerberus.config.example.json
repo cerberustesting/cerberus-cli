@@ -4,5 +4,6 @@
   "defaultBaseDir": "./cerberus",
   "application": "MyApplication",
   "country": "FR",
-  "environment": "QA"
+  "environment": "QA",
+  "system": "MySystem"
 }
