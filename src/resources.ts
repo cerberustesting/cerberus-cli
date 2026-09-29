@@ -1,16 +1,17 @@
 import fs from "fs";
 import path from "path";
-import YAML from "yaml";
+import ts from "typescript";
 import type { CerberusConfig, CerberusWorkspacePaths } from "./config.js";
 import { workspacePaths } from "./config.js";
-import { canon, sameContent } from "./sync.js";
+import { sameContent } from "./sync.js";
 
-export type ResourceKind = "applicationObjects" | "services" | "datalib" | "labels";
+export type ResourceKind = "applicationObjects" | "services" | "datalib";
 type Payload = Record<string, any>;
 
 interface ResourceSpec {
   kind: ResourceKind;
-  dir: keyof Pick<CerberusWorkspacePaths, "applicationObjects" | "services" | "datalib" | "labels">;
+  dir: keyof Pick<CerberusWorkspacePaths, "applicationObjects" | "services" | "datalib">;
+  typeName: "CerberusApplicationObject" | "CerberusService" | "CerberusDataLib";
   listPath(config: CerberusConfig): string;
   getPath(payload: Payload, config: CerberusConfig): string | undefined;
   createPath(payload: Payload, config: CerberusConfig): string;
@@ -24,7 +25,7 @@ interface ResourceSpec {
 }
 
 interface ResourceState {
-  formatVersion: 1;
+  formatVersion: 2;
   serverPayload: Payload;
 }
 
@@ -58,6 +59,7 @@ const specs: ResourceSpec[] = [
   {
     kind: "applicationObjects",
     dir: "applicationObjects",
+    typeName: "CerberusApplicationObject",
     listPath: (c) => `/applicationobjects/${encodeURIComponent(c.application ?? "")}`,
     getPath: (p) =>
       p.application && p.object
@@ -69,19 +71,20 @@ const specs: ResourceSpec[] = [
         ? `/applicationobjects/${encodeURIComponent(p.application)}/${encodeURIComponent(p.object)}`
         : undefined,
     identity: (p) => `${p.application ?? ""}/${p.object ?? ""}`,
-    fileName: (p) => `${safeName(p.object)}.yaml`,
+    fileName: (p) => `${safeName(p.object)}.ts`,
     editable: (p) => withoutVolatile(p, ["id"]),
-    validate: (p, file) => required(p, file, ["application", "object"]),
+    validate: (p, file) => required(p, file, ["application", "object", "value"]),
   },
   {
     kind: "services",
     dir: "services",
+    typeName: "CerberusService",
     listPath: (c) => `/services${c.application ? `?application=${encodeURIComponent(c.application)}` : ""}`,
     getPath: (p) => (p.service ? `/services/${encodeURIComponent(p.service)}` : undefined),
     createPath: () => "/services",
     updatePath: (p) => (p.service ? `/services/${encodeURIComponent(p.service)}` : undefined),
     identity: (p) => String(p.service ?? ""),
-    fileName: (p) => `${safeName(p.service)}.yaml`,
+    fileName: (p) => `${safeName(p.service)}.ts`,
     editable: (p) => withoutVolatile(p),
     validate: (p, file) => required(p, file, ["service", "type", "method"]),
     hydrateListItem: true,
@@ -89,8 +92,9 @@ const specs: ResourceSpec[] = [
   {
     kind: "datalib",
     dir: "datalib",
+    typeName: "CerberusDataLib",
     listPath: (c) => {
-      const system = (c as any).system as string | undefined;
+      const system = c.system as string | undefined;
       return `/datalibs${system ? `?system=${encodeURIComponent(system)}` : ""}`;
     },
     getPath: (p) => (p.id !== undefined && p.id !== null ? `/datalibs/${encodeURIComponent(p.id)}` : undefined),
@@ -98,26 +102,10 @@ const specs: ResourceSpec[] = [
     updatePath: (p) => (p.id !== undefined && p.id !== null ? `/datalibs/${encodeURIComponent(p.id)}` : undefined),
     identity: (p) => p.id != null ? String(p.id) : `${p.name ?? ""}|${p.system ?? ""}|${p.environment ?? ""}|${p.country ?? ""}`,
     naturalIdentity: (p) => `${p.name ?? ""}|${p.system ?? ""}|${p.environment ?? ""}|${p.country ?? ""}|${p.type ?? ""}`,
-    fileName: (p) => p.id != null ? `${p.id} - ${safeName(p.name)}.yaml` : `${safeName(p.name)}.yaml`,
+    fileName: (p) => p.id != null ? `${p.id} - ${safeName(p.name)}.ts` : `${safeName(p.name)}.ts`,
     editable: (p) => withoutVolatile(p),
     validate: (p, file) => required(p, file, ["name", "type"]),
     hydrateListItem: true,
-  },
-  {
-    kind: "labels",
-    dir: "labels",
-    listPath: (c) => {
-      const system = (c as any).system as string | undefined;
-      return `/labels${system ? `?system=${encodeURIComponent(system)}` : ""}`;
-    },
-    getPath: (p) => (p.id !== undefined && p.id !== null ? `/labels/${encodeURIComponent(p.id)}` : undefined),
-    createPath: () => "/labels",
-    updatePath: (p) => (p.id !== undefined && p.id !== null ? `/labels/${encodeURIComponent(p.id)}` : undefined),
-    identity: (p) => p.id != null ? String(p.id) : `${p.system ?? ""}|${p.type ?? ""}|${p.label ?? ""}`,
-    naturalIdentity: (p) => `${p.system ?? ""}|${p.type ?? ""}|${p.label ?? ""}`,
-    fileName: (p) => p.id != null ? `${p.id} - ${safeName(p.label)}.yaml` : `${safeName(p.label)}.yaml`,
-    editable: (p) => withoutVolatile(p),
-    validate: (p, file) => required(p, file, ["label", "type"]),
   },
 ];
 
@@ -144,18 +132,30 @@ function resourceDir(paths: CerberusWorkspacePaths, spec: ResourceSpec): string 
 }
 
 function statePath(dir: string, fileName: string): string {
-  return path.join(dir, ".cerberus", fileName.replace(/\.ya?ml$/i, ".json"));
+  return path.join(dir, ".cerberus", fileName.replace(/\.(?:ts|ya?ml)$/i, ".json"));
+}
+
+function sourceText(spec: ResourceSpec, payload: Payload): string {
+  return [
+    "// Synchronized by Cerberus CLI. Edit this object, then run 'cerberus validate' and 'cerberus push'.",
+    `export default ${JSON.stringify(spec.editable(payload), null, 2)} satisfies ${spec.typeName};`,
+    "",
+  ].join("\n");
+}
+
+function writeState(dir: string, fileName: string, payload: Payload): void {
+  const state: ResourceState = { formatVersion: 2, serverPayload: payload };
+  const stateFile = statePath(dir, fileName);
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + "\n", "utf8");
 }
 
 function writeResource(dir: string, spec: ResourceSpec, payload: Payload): string {
   fs.mkdirSync(dir, { recursive: true });
   const fileName = spec.fileName(payload);
   const file = path.join(dir, fileName);
-  fs.writeFileSync(file, YAML.stringify(spec.editable(payload)), "utf8");
-  const state: ResourceState = { formatVersion: 1, serverPayload: payload };
-  const stateFile = statePath(dir, fileName);
-  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
-  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + "\n", "utf8");
+  fs.writeFileSync(file, sourceText(spec, payload), "utf8");
+  writeState(dir, fileName, payload);
   return file;
 }
 
@@ -167,27 +167,59 @@ function readState(dir: string, fileName: string): ResourceState | null {
   }
 }
 
-function readYaml(file: string): Payload {
-  const parsed = YAML.parse(fs.readFileSync(file, "utf8"));
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`${file} doit contenir un objet YAML.`);
+function parseTsLiteral(node: ts.Expression): unknown {
+  if (ts.isParenthesizedExpression(node)) return parseTsLiteral(node.expression);
+  if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) return parseTsLiteral(node.expression);
+  if (ts.isStringLiteralLike(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isNumericLiteral(node)) return Number(node.text);
+  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
+  if (node.kind === ts.SyntaxKind.NullKeyword) return null;
+  if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(node.operand)) {
+    return -Number(node.operand.text);
   }
-  return parsed as Payload;
+  if (ts.isArrayLiteralExpression(node)) return node.elements.map((e) => parseTsLiteral(e as ts.Expression));
+  if (ts.isObjectLiteralExpression(node)) {
+    const out: Record<string, unknown> = {};
+    for (const prop of node.properties) {
+      if (!ts.isPropertyAssignment(prop)) throw new Error("Only plain object properties are supported.");
+      const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) || ts.isNumericLiteral(prop.name)
+        ? prop.name.text
+        : undefined;
+      if (!key) throw new Error("Computed property names are not supported.");
+      out[key] = parseTsLiteral(prop.initializer);
+    }
+    return out;
+  }
+  throw new Error(`Unsupported TypeScript expression: ${node.getText()}`);
 }
 
-function yamlFiles(dir: string): string[] {
+function readResourceFile(file: string): Payload {
+  const source = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  for (const statement of source.statements) {
+    if (ts.isExportAssignment(statement)) {
+      const value = parseTsLiteral(statement.expression);
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("default export must be an object literal.");
+      }
+      return value as Payload;
+    }
+  }
+  throw new Error("Missing 'export default { ... }'.");
+}
+
+function resourceFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && /\.ya?ml$/i.test(e.name))
+    .filter((e) => e.isFile() && e.name.endsWith(".ts"))
     .map((e) => path.join(dir, e.name));
 }
 
 function locallyModified(dir: string, spec: ResourceSpec, file: string): boolean {
-  const fileName = path.basename(file);
-  const state = readState(dir, fileName);
+  const state = readState(dir, path.basename(file));
   if (!state) return true;
   try {
-    return !sameContent(readYaml(file), spec.editable(state.serverPayload));
+    return !sameContent(readResourceFile(file), spec.editable(state.serverPayload));
   } catch {
     return true;
   }
@@ -195,11 +227,13 @@ function locallyModified(dir: string, spec: ResourceSpec, file: string): boolean
 
 function findExistingFile(dir: string, spec: ResourceSpec, payload: Payload): string | undefined {
   const wanted = spec.identity(payload);
-  for (const file of yamlFiles(dir)) {
+  for (const file of resourceFiles(dir)) {
     try {
-      if (spec.identity(readYaml(file)) === wanted) return file;
+      const state = readState(dir, path.basename(file));
+      const candidate = state?.serverPayload ?? readResourceFile(file);
+      if (spec.identity(candidate) === wanted) return file;
     } catch {
-      // validation reports malformed YAML separately
+      // malformed resource is reported by validate
     }
   }
   return undefined;
@@ -214,6 +248,21 @@ async function fullPayload(config: CerberusConfig, spec: ResourceSpec, item: Pay
     throw new Error(`Impossible de relire ${spec.kind} ${spec.identity(item)} : HTTP ${res.status} ${res.text ?? ""}`);
   }
   return res.data;
+}
+
+async function pullLabelCatalog(config: CerberusConfig, paths: CerberusWorkspacePaths): Promise<void> {
+  const query = config.system ? `?system=${encodeURIComponent(config.system)}` : "";
+  const list = await api<Payload[]>(config, "GET", `/labels${query}`);
+  if (list.status !== 200 || !Array.isArray(list.data)) {
+    throw new Error(`Pull labels impossible : HTTP ${list.status} ${list.text ?? ""}`);
+  }
+  fs.mkdirSync(paths.internal, { recursive: true });
+  fs.writeFileSync(
+    path.join(paths.internal, "labels.json"),
+    JSON.stringify({ formatVersion: 1, labels: list.data }, null, 2) + "\n",
+    "utf8"
+  );
+  console.log(`🏷️ labels : ${list.data.length} disponibles dans le catalogue IDE/CLI`);
 }
 
 export async function pullResources(config: CerberusConfig): Promise<void> {
@@ -242,7 +291,7 @@ export async function pullResources(config: CerberusConfig): Promise<void> {
         const conflictDir = path.join(dir, ".cerberus", "conflicts");
         fs.mkdirSync(conflictDir, { recursive: true });
         fs.writeFileSync(
-          path.join(conflictDir, spec.fileName(payload).replace(/\.ya?ml$/i, ".server.json")),
+          path.join(conflictDir, spec.fileName(payload).replace(/\.ts$/i, ".server.json")),
           JSON.stringify(payload, null, 2) + "\n",
           "utf8"
         );
@@ -260,6 +309,8 @@ export async function pullResources(config: CerberusConfig): Promise<void> {
 
     console.log(`📦 ${spec.kind} : ${written} synchronisé(s)${conflicts ? `, ${conflicts} conflit(s) local(aux) préservé(s)` : ""}`);
   }
+
+  await pullLabelCatalog(config, paths);
 }
 
 export function validateResources(config: CerberusConfig): string[] {
@@ -268,9 +319,9 @@ export function validateResources(config: CerberusConfig): string[] {
 
   for (const spec of specs) {
     const dir = resourceDir(paths, spec);
-    for (const file of yamlFiles(dir)) {
+    for (const file of resourceFiles(dir)) {
       try {
-        const payload = readYaml(file);
+        const payload = readResourceFile(file);
         issues.push(...spec.validate(payload, path.relative(process.cwd(), file)));
         if (spec.kind === "applicationObjects" && config.application && payload.application !== config.application) {
           issues.push(`${path.relative(process.cwd(), file)} - application '${payload.application}' différente de l'application configurée '${config.application}'.`);
@@ -297,11 +348,11 @@ export async function pushResources(config: CerberusConfig, opts: PushResourceOp
 
   for (const spec of specs) {
     const dir = resourceDir(paths, spec);
-    for (const file of yamlFiles(dir)) {
+    for (const file of resourceFiles(dir)) {
       const fileName = path.basename(file);
       let local: Payload;
       try {
-        local = readYaml(file);
+        local = readResourceFile(file);
         const validation = spec.validate(local, path.relative(process.cwd(), file));
         if (validation.length) {
           validation.forEach((x) => console.error(`❌ ${x}`));
@@ -396,9 +447,7 @@ export async function pushResources(config: CerberusConfig, opts: PushResourceOp
         continue;
       }
 
-      const updatePayload = { ...local };
-      // IDs sont gérés par les paths pour labels/datalib et ne sont pas requis dans le body.
-      const updated = await api<Payload>(config, "PUT", updateUrl, updatePayload);
+      const updated = await api<Payload>(config, "PUT", updateUrl, local);
       if (updated.status < 200 || updated.status >= 300 || !updated.data) {
         console.error(`❌ Mise à jour ${spec.kind}/${spec.identity(local)} impossible : HTTP ${updated.status} ${updated.text ?? ""}`);
         failed++;
@@ -419,4 +468,13 @@ export async function pushResources(config: CerberusConfig, opts: PushResourceOp
 
   console.log(`📦 Ressources : ${pushed} poussée(s), ${unchanged} inchangée(s), ${blocked} bloquée(s), ${failed} erreur(s).`);
   return blocked || failed ? 1 : 0;
+}
+
+export function readLabelCatalog(workspaceRoot: string): Payload[] {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(workspaceRoot, ".cerberus", "labels.json"), "utf8"));
+    return Array.isArray(raw.labels) ? raw.labels : [];
+  } catch {
+    return [];
+  }
 }
