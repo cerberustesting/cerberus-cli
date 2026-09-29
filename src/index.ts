@@ -7,6 +7,7 @@ import { pullTests } from "./commands/pull.js";
 import { pushCommand } from "./commands/push.js";
 import { loginCommand } from "./commands/login.js";
 import { initCommand } from "./commands/init.js";
+import { validateCommand } from "./commands/validate.js";
 
 const pkg = JSON.parse(
     fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf8")
@@ -31,6 +32,13 @@ program
     .description("Met à jour le serveur Cerberus avec les fichiers locaux")
     .action(async () => {
         await pushCommand();
+    });
+
+program
+    .command("validate")
+    .description("Valide les fichiers Cerberus locaux et le DSL Playwright-like")
+    .action(async () => {
+        await validateCommand();
     });
 
 program
