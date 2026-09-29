@@ -309,7 +309,11 @@ function renderPropertyDefinition(property: NonNullable<TestCaseDetailed["proper
     if (value === undefined || value === null || String(value) === "") continue;
     if (["rowLimit", "rank", "retryNb", "retryPeriod", "cacheExpire"].includes(method) && Number(value) === 0) continue;
     if (method === "nature" && String(value).toUpperCase() === "STATIC") continue;
-    expression += `.${method}(${literal(value)})`;
+    const rendered =
+      method === "length" && /^-?\d+$/.test(String(value))
+        ? String(Number(value))
+        : literal(value);
+    expression += `.${method}(${rendered})`;
   }
 
   return expression;
@@ -885,6 +889,7 @@ function parsePropertyBuilder(
   }
 
   if (values.nature !== undefined) values.nature = normalizedNature(values.nature);
+  if (values.length !== undefined) values.length = String(values.length);
   return { type, values };
 }
 
@@ -910,6 +915,24 @@ function parsePropertyDefinition(
         file: source.fileName,
         line: sourceLine(source, expression),
         message: `Property ${name}: ${builder.type} requires a literal primary value.`,
+      });
+      return undefined;
+    }
+
+    if (builder.type === "getFromSql" && !hasText(builder.values.database)) {
+      issues.push({
+        file: source.fileName,
+        line: sourceLine(source, expression),
+        message: `Property ${name}: cerberus.fromSql(...) requires .database("...").`,
+      });
+      return undefined;
+    }
+
+    if (builder.values.nature !== undefined && !["STATIC", "RANDOM", "RANDOMNEW", "NOTINUSE"].includes(String(builder.values.nature))) {
+      issues.push({
+        file: source.fileName,
+        line: sourceLine(source, expression),
+        message: `Property ${name}: unsupported nature '${builder.values.nature}'.`,
       });
       return undefined;
     }
