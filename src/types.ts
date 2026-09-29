@@ -103,10 +103,15 @@ export interface TestCaseProperty {
     value1?: string;
     value2?: string;
     value3?: string;
+    database?: string;
     length?: string;
     rowLimit?: number;
     nature?: string;
     rank?: number | string;
+    retryNb?: number;
+    retryPeriod?: number;
+    cacheExpire?: number;
+    description?: string;
     dateCreated: string;
     dateModif: string;
     countries?: TestCaseCountry[];
