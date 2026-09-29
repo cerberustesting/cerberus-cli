@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import ts from "typescript";
 import YAML from "yaml";
-import type { TestAction, TestCaseDetailed, TestCaseStep } from "../types.js";
+import type { TestAction, TestCaseDetailed, TestCaseStep, TestControl } from "../types.js";
 
 export interface LocalMetadata {
   formatVersion: 1;
@@ -41,30 +41,34 @@ function literal(value: unknown): string {
 
 function renderAction(action: TestAction, indent = "        "): string[] {
   const prefix = indent + "await ";
+  let lines: string[];
 
   switch (action.action) {
     case "openUrl":
-      return [`${prefix}page.goto(${literal(action.value1)});`];
+      lines = [`${prefix}page.goto(${literal(action.value1)});`];
+      break;
 
     case "wait": {
       const ms = Number(action.value1 ?? 0);
-      return [`${prefix}page.waitForTimeout(${Number.isFinite(ms) ? ms : literal(action.value1)});`];
+      lines = [`${prefix}page.waitForTimeout(${Number.isFinite(ms) ? ms : literal(action.value1)});`];
+      break;
     }
 
     case "executeJS": {
-      const lines = [`${prefix}page.evaluate(() => {`];
+      lines = [`${prefix}page.evaluate(() => {`];
       for (const line of String(action.value1 ?? "").split(/\r?\n/)) {
         lines.push(indent + "    " + line);
       }
       lines.push(indent + "});");
-      return lines;
+      break;
     }
 
     case "calculateProperty":
-      return [`${prefix}cerberus.calculateProperty(${literal(action.value1)});`];
+      lines = [`${prefix}cerberus.calculateProperty(${literal(action.value1)});`];
+      break;
 
     default:
-      return [
+      lines = [
         `${prefix}cerberus.action(${literal(action.action)}, ${JSON.stringify({
           value1: action.value1,
           value2: action.value2,
@@ -79,6 +83,25 @@ function renderAction(action: TestAction, indent = "        "): string[] {
         })});`,
       ];
   }
+
+  for (const control of action.controls ?? []) {
+    lines.push(
+      `${prefix}cerberus.control(${literal(control.control)}, ${JSON.stringify({
+        value1: (control as any).value1,
+        value2: (control as any).value2,
+        value3: (control as any).value3,
+        conditionOperator: control.conditionOperator,
+        isFatal: control.isFatal,
+        doScreenshotBefore: control.doScreenshotBefore,
+        doScreenshotAfter: control.doScreenshotAfter,
+        waitBefore: control.waitBefore,
+        waitAfter: control.waitAfter,
+        description: control.description,
+      })});`
+    );
+  }
+
+  return lines;
 }
 
 export function toLocalMetadata(test: TestCaseDetailed): LocalMetadata {
@@ -150,6 +173,24 @@ function stringArg(call: ts.CallExpression, index: number): string | undefined {
 
 function sourceLine(source: ts.SourceFile, node: ts.Node): number {
   return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+}
+
+function parseObjectArg(call: ts.CallExpression, index: number): Record<string, unknown> {
+  const arg = call.arguments[index];
+  if (!arg || !ts.isObjectLiteralExpression(arg)) return {};
+  const result: Record<string, unknown> = {};
+  for (const prop of arg.properties) {
+    if (!ts.isPropertyAssignment(prop)) continue;
+    const key =
+      ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
+    if (!key) continue;
+    const value = prop.initializer;
+    if (ts.isStringLiteralLike(value) || ts.isNoSubstitutionTemplateLiteral(value)) result[key] = value.text;
+    else if (ts.isNumericLiteral(value)) result[key] = Number(value.text);
+    else if (value.kind === ts.SyntaxKind.TrueKeyword) result[key] = true;
+    else if (value.kind === ts.SyntaxKind.FalseKeyword) result[key] = false;
+  }
+  return result;
 }
 
 function parseActionCall(
@@ -226,6 +267,19 @@ function parseActionCall(
     return { ...base, action: "calculateProperty", value1: value };
   }
 
+  if (ts.isIdentifier(receiver) && receiver.text === "cerberus" && method === "action") {
+    const actionName = stringArg(call, 0);
+    if (!actionName) {
+      issues.push({
+        file: source.fileName,
+        line: sourceLine(source, call),
+        message: "cerberus.action() requires a literal action name.",
+      });
+      return undefined;
+    }
+    return { ...base, ...parseObjectArg(call, 1), action: actionName } as TestAction;
+  }
+
   issues.push({
     file: source.fileName,
     line: sourceLine(source, call),
@@ -272,10 +326,59 @@ export function parseSpec(
         if (ts.isAwaitExpression(expression)) expression = expression.expression;
         if (!ts.isCallExpression(expression)) continue;
 
+        if (
+          ts.isPropertyAccessExpression(expression.expression) &&
+          ts.isIdentifier(expression.expression.expression) &&
+          expression.expression.expression.text === "cerberus" &&
+          expression.expression.name.text === "control"
+        ) {
+          const lastAction = actions[actions.length - 1];
+          if (!lastAction) {
+            issues.push({
+              file: specPath,
+              line: sourceLine(source, expression),
+              message: "cerberus.control() must follow an action.",
+            });
+            continue;
+          }
+          const controlName = stringArg(expression, 0);
+          if (!controlName) {
+            issues.push({
+              file: specPath,
+              line: sourceLine(source, expression),
+              message: "cerberus.control() requires a literal control name.",
+            });
+            continue;
+          }
+          const existing = originalStep?.actions?.[actions.length - 1]?.controls?.[lastAction.controls?.length ?? 0];
+          const control: TestControl = {
+            ...(existing ?? {
+              testFolderId: lastAction.testFolderId,
+              testcaseId: lastAction.testcaseId,
+              stepId: lastAction.stepId,
+              actionId: lastAction.actionId,
+              controlId: (lastAction.controls?.length ?? 0) + 1,
+              sort: (lastAction.controls?.length ?? 0) + 1,
+              conditionOperator: "always",
+              control: controlName,
+              isFatal: false,
+              doScreenshotBefore: false,
+              doScreenshotAfter: false,
+              waitBefore: 0,
+              waitAfter: 0,
+            }),
+            ...parseObjectArg(expression, 1),
+            control: controlName,
+          } as TestControl;
+          lastAction.controls = [...(lastAction.controls ?? []), control];
+          continue;
+        }
+
         const action = parseActionCall(expression, source, originalStep?.actions?.[actions.length], issues);
         if (!action) continue;
 
         action.sort = actions.length + 1;
+        action.controls = [];
         actions.push(action);
       }
 
