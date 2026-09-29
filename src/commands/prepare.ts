@@ -105,7 +105,7 @@ function metadataHasDescription(call: ts.CallExpression): boolean {
 }
 
 function analyzeSpec(testDir: string): PrepareReport {
-  const specPath = path.join(testDir, "test.spec.ts");
+  const specPath = path.join(testDir, "script.ts");
   const source = ts.createSourceFile(
     specPath,
     fs.readFileSync(specPath, "utf8"),
