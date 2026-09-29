@@ -9,11 +9,17 @@
     },
     "testFolder": {
       "type": "string",
-      "description": "Cerberus test folder ID"
+      "description": "Identifiant du Test Folder Cerberus dans lequel le testcase est stocké.",
+      "title": "Test Folder"
     },
     "testcase": {
       "type": "string",
-      "description": "Local provisional testcase identifier. Ignored on creation; Cerberus generates the server testcase ID."
+      "description": "Identifiant du testcase dans Cerberus. Pour un testcase déjà synchronisé, il correspond à l'ID serveur. Pour une création locale, cette valeur est seulement provisoire : elle n'est pas envoyée au POST, Cerberus génère l'ID disponible puis le CLI met à jour ce champ et renomme le dossier local.",
+      "title": "Testcase ID",
+      "examples": [
+        "0001A",
+        "mon-nouveau-test"
+      ]
     },
     "application": {
       "type": "string"
