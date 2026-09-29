@@ -681,6 +681,37 @@ export function parseSpec(
   return { steps, issues };
 }
 
+function draftStateFromMetadata(testDir: string, metadata: LocalMetadata): LocalState {
+  const parts = testDir.split(path.sep);
+  const folderFromPath = parts[parts.length - 2] ?? "";
+  const testcaseFromPath = parts[parts.length - 1] ?? "";
+
+  const serverPayload: TestCaseDetailed = {
+    testFolderId: metadata.testFolder || folderFromPath,
+    testcaseId: metadata.testcase || testcaseFromPath,
+    application: metadata.application,
+    description: metadata.description,
+    detailedDescription: metadata.detailedDescription,
+    priority: metadata.priority ?? 1,
+    version: 0,
+    status: metadata.status || "WORKING",
+    isActive: metadata.active?.default ?? true,
+    isActiveQA: metadata.active?.QA ?? true,
+    isActiveUAT: metadata.active?.UAT ?? true,
+    isActivePROD: metadata.active?.PROD ?? true,
+    conditionOperator: metadata.conditionOperator || "always",
+    type: metadata.type || "AUTOMATED",
+    usrCreated: "",
+    dateCreated: "",
+    steps: [],
+    properties: Array.isArray(metadata.properties)
+      ? (metadata.properties as TestCaseDetailed["properties"])
+      : [],
+  };
+
+  return { formatVersion: 1, serverPayload };
+}
+
 export function readLocalTest(testDir: string): { data: TestCaseDetailed; issues: ValidationIssue[] } {
   const metadataPath = path.join(testDir, "cerberus.yaml");
   const specPath = path.join(testDir, "test.spec.ts");
@@ -688,10 +719,10 @@ export function readLocalTest(testDir: string): { data: TestCaseDetailed; issues
 
   if (!fs.existsSync(metadataPath)) throw new Error(`Missing ${metadataPath}`);
   if (!fs.existsSync(specPath)) throw new Error(`Missing ${specPath}`);
-  if (!fs.existsSync(statePath)) throw new Error(`Missing ${statePath}; run cerberus pull first.`);
-
   const metadata = YAML.parse(fs.readFileSync(metadataPath, "utf8")) as LocalMetadata;
-  const state = JSON.parse(fs.readFileSync(statePath, "utf8")) as LocalState;
+  const state = fs.existsSync(statePath)
+    ? (JSON.parse(fs.readFileSync(statePath, "utf8")) as LocalState)
+    : draftStateFromMetadata(testDir, metadata);
 
   if (metadata.formatVersion !== 1 || state.formatVersion !== 1) {
     throw new Error(`Unsupported local format in ${testDir}`);
