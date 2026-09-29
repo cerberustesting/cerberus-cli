@@ -23,11 +23,19 @@ function instructions(dir: string): string {
 ## Tests Cerberus
 
 Le repository local Cerberus vit dans :
-- \`${dir}/<testFolderId>/<testcaseId - description>/test.spec.ts\` : scénario Playwright-like éditable.
-- \`${dir}/<testFolderId>/<testcaseId - description>/cerberus.yaml\` : métadonnées Cerberus.
-- \`${dir}/<testFolderId>/<testcaseId - description>/.cerberus/state.json\` : état technique de round-trip, ne pas éditer manuellement.
-- \`${dir}/<testFolderId>/<testcaseId - description>/.cerberus/conflict-vN.json\` : version serveur en conflit avec vos modifications locales, à résoudre puis supprimer.
-- \`${dir}/.cerberus/cerberus-dsl.d.ts\` et \`${dir}/tsconfig.json\` : types du DSL pour l'IDE, régénérés par \`pull\`, ne pas éditer.
+- \`${dir}/tests/<testFolderId>/<testcaseId - description>/\` : testcases et scénarios Playwright-like.
+- \`${dir}/applicationObjects/\` : objets applicatifs / sélecteurs partagés.
+- \`${dir}/services/\` : définitions de services utilisées pour les appels API Cerberus.
+- \`${dir}/datalib/\` : bibliothèques de données Cerberus.
+- \`${dir}/labels/\` : labels Cerberus attachables notamment aux testcases.
+- \`${dir}/.cerberus/\` : fichiers techniques du CLI (schémas/types).
+
+Pour un testcase :
+- \`${dir}/tests/<testFolderId>/<testcaseId - description>/test.spec.ts\` : scénario Playwright-like éditable.
+- \`${dir}/tests/<testFolderId>/<testcaseId - description>/cerberus.yaml\` : métadonnées Cerberus.
+- \`${dir}/tests/<testFolderId>/<testcaseId - description>/.cerberus/state.json\` : état technique de round-trip, ne pas éditer manuellement.
+- \`${dir}/tests/<testFolderId>/<testcaseId - description>/.cerberus/conflict-vN.json\` : version serveur en conflit.
+- \`${dir}/.cerberus/cerberus-dsl.d.ts\` et \`${dir}/tsconfig.json\` : types du DSL pour l'IDE.
 
 Commandes :
 - \`cerberus pull\` : télécharge et convertit les tests vers le format local.
@@ -75,7 +83,7 @@ Quand l'utilisateur demande « convertis en Cerberus », « Cerberusify », « c
 7. lancer \`cerberus validate\` et corriger toutes les erreurs ;
 8. lancer \`cerberus push <dossier/id> --dry-run\`, examiner les changements, puis \`cerberus push <dossier/id>\` si le résultat est cohérent.
 
-Pour créer un nouveau testcase local, créer \`<dossier>/<nom-provisoire>/cerberus.yaml\` et \`test.spec.ts\` sans \`.cerberus/state.json\`. Après \`validate\`, un \`push\` crée le testcase sans envoyer de \`testcaseId\` : Cerberus attribue l'ID disponible, puis le CLI adopte cet ID et renomme le dossier local.
+Pour créer un nouveau testcase local, créer \`${dir}/tests/<testFolder>/<nom-provisoire>/cerberus.yaml\` et \`test.spec.ts\` sans \`.cerberus/state.json\`. Après \`validate\`, un \`push\` crée le testcase sans envoyer de \`testcaseId\` : Cerberus attribue l'ID disponible, puis le CLI adopte cet ID et renomme le dossier local.
 
 Le rôle de l'IA est d'ajouter la structure et les métadonnées Cerberus autour du Playwright existant, pas de réécrire inutilement
 le scénario ni d'en changer l'intention fonctionnelle.
@@ -123,10 +131,20 @@ function mergeVscodeSettings(root: string, schemaRel: string, dir: string): void
     }
     settings["yaml.schemas"] = {
         ...(settings["yaml.schemas"] ?? {}),
-        [schemaRel]: `${dir}/**/cerberus.yaml`,
+        [schemaRel]: `${dir}/tests/**/cerberus.yaml`,
     };
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n", "utf8");
+}
+
+function ensureWorkspaceLayout(root: string, dir: string): void {
+    const workspace = path.join(root, dir);
+    for (const name of ["tests", "applicationObjects", "services", "datalib", "labels"]) {
+        const target = path.join(workspace, name);
+        fs.mkdirSync(target, { recursive: true });
+        const keep = path.join(target, ".gitkeep");
+        if (!fs.existsSync(keep)) fs.writeFileSync(keep, "", "utf8");
+    }
 }
 
 export function initCommand(opts: InitOptions): void {
@@ -147,6 +165,9 @@ export function initCommand(opts: InitOptions): void {
         console.log("✅ cerberus.config.json créé");
     }
 
+    ensureWorkspaceLayout(root, dir);
+    console.log("✅ Workspace Cerberus créé (tests, applicationObjects, services, datalib, labels)");
+
     const schemaDir = path.join(root, dir, ".cerberus");
     fs.mkdirSync(schemaDir, { recursive: true });
     fs.copyFileSync(SCHEMA_SRC, path.join(schemaDir, "cerberus-testcase.schema.json"));
@@ -154,7 +175,7 @@ export function initCommand(opts: InitOptions): void {
     console.log("✅ Schéma installé et associé dans VS Code (extension YAML de Red Hat requise)");
 
     writeDslTypes(path.join(root, dir));
-    console.log("✅ Types du DSL installés (cerberus/tsconfig.json + .cerberus/cerberus-dsl.d.ts)");
+    console.log(`✅ Types du DSL installés (${dir}/tsconfig.json + ${dir}/.cerberus/cerberus-dsl.d.ts)`);
 
     ensureGitignore(root, ["cerberus.config.json", `${dir}/**/.cerberus/conflict-*.json`]);
 
