@@ -4,6 +4,7 @@ import { loadConfig } from "../config.js";
 import { findLocalTestDirs, readLocalTest, writeLocalTest } from "../dsl/local-format.js";
 import {
   backupServerState,
+  createServerTest,
   describeChanges,
   describeHttpFailure,
   fetchServerTest,
@@ -78,13 +79,8 @@ export async function pushCommand(refs: string[], opts: PushOptions): Promise<nu
     }
 
     const state = readState(testDir);
-    if (!state) {
-      console.error(`❌ ${label} non poussé : pas d'état de base (.cerberus/state.json), lancez 'pull'.`);
-      failed++;
-      continue;
-    }
 
-    // 3. le serveur a-t-il changé ?
+    // 3. le serveur existe-t-il / a-t-il changé ?
     let server;
     try {
       server = await fetchServerTest(config, data);
@@ -94,10 +90,74 @@ export async function pushCommand(refs: string[], opts: PushOptions): Promise<nu
       continue;
     }
     if (!server) {
-      console.error(`❌ ${label} non poussé : ce testcase n'existe pas sur le serveur (la création n'est pas gérée par push).`);
-      failed++;
+      if (opts.dryRun) {
+        console.log(`🆕 ${label} : serait créé sur le serveur`);
+        console.log(`   • application : ${data.application}`);
+        console.log(`   • description : ${data.description}`);
+        console.log(`   • steps : ${data.steps?.length ?? 0}`);
+        continue;
+      }
+
+      const createRes = await createServerTest(config, data);
+      if (!createRes.ok) {
+        console.error(`❌ Création ${label} impossible : ${await describeHttpFailure(createRes)}`);
+        failed++;
+        continue;
+      }
+
+      let created;
+      try {
+        const body = (await createRes.json()) as { data?: typeof data };
+        created = body.data;
+      } catch {
+        created = undefined;
+      }
+
+      const createdRef = created
+        ? { testFolderId: created.testFolderId, testcaseId: created.testcaseId }
+        : { testFolderId: data.testFolderId, testcaseId: data.testcaseId };
+
+      let afterCreate;
+      try {
+        afterCreate = created ?? (await fetchServerTest(config, createdRef));
+      } catch (err) {
+        console.error(`❌ ${label} : créé, mais impossible de relire le testcase : ${(err as Error).message}`);
+        failed++;
+        continue;
+      }
+
+      if (!afterCreate) {
+        console.error(`❌ ${label} : création annoncée mais testcase introuvable après POST.`);
+        failed++;
+        continue;
+      }
+
+      const problems = verifyPush(data, afterCreate).filter(
+        (problem) => !problem.startsWith("testcaseId")
+      );
+      if (problems.length > 0) {
+        console.error(`❌ ${label} : testcase créé mais contenu différent de ce qui était attendu`);
+        problems.forEach((problem) => console.error(`   • ${problem}`));
+        failed++;
+        continue;
+      }
+
+      writeLocalTest(testDir, afterCreate);
+      console.log(
+        `🆕 ${label} : créé sur le serveur comme ${afterCreate.testFolderId}/${afterCreate.testcaseId} (v${afterCreate.version}), vérifié.`
+      );
+      pushed++;
       continue;
     }
+
+    if (!state) {
+      console.error(
+        `❌ ${label} non poussé : le testcase existe déjà sur le serveur mais aucun état local de base n'est disponible. Lancez 'pull' avant de l'écraser.`
+      );
+      blocked++;
+      continue;
+    }
+
     if (!sameContent(server, state.serverPayload)) {
       if (!opts.force) {
         console.error(
