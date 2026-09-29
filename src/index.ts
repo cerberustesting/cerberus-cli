@@ -8,6 +8,7 @@ import { pushCommand } from "./commands/push.js";
 import { loginCommand } from "./commands/login.js";
 import { initCommand } from "./commands/init.js";
 import { validateCommand } from "./commands/validate.js";
+import { runCommand } from "./commands/run.js";
 
 const pkg = JSON.parse(
     fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf8")
@@ -32,6 +33,26 @@ program
     .description("Met à jour le serveur Cerberus avec les fichiers locaux")
     .action(async () => {
         await pushCommand();
+    });
+
+const collect = (value: string, previous: string[]): string[] => [...previous, value];
+
+program
+    .command("run [testcases...]")
+    .description("Lance un ou plusieurs tests Cerberus et attend leur résultat")
+    .option("-f, --folder <folder>", "lance tous les tests locaux d'un dossier", collect, [])
+    .option("-c, --country <country>", "pays d'exécution (répétable)", collect, [])
+    .option("-e, --env <environment>", "environnement d'exécution (répétable)", collect, [])
+    .option("-r, --robot <robot>", "robot d'exécution (répétable)", collect, [])
+    .option("--tag <tag>", "tag d'exécution Cerberus")
+    .option("--timeout <seconds>", "délai maximum d'attente", "900")
+    .option("--interval <seconds>", "intervalle de polling", "5")
+    .option("--junit <file>", "écrit un rapport JUnit XML")
+    .option("--json", "sortie JSON")
+    .option("--no-wait", "n'attend pas la fin des exécutions")
+    .action(async (testcases: string[], opts) => {
+        const code = await runCommand(testcases ?? [], opts);
+        if (code !== 0) process.exitCode = code;
     });
 
 program
