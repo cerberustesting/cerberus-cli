@@ -1,17 +1,14 @@
 import fs from "fs";
 import path from "path";
-import YAML from "yaml";
 import { execSync } from "child_process";
 import { loadConfig, testsDir, workspaceDir } from "../config.js";
 import { isLocallyModified } from "../sync.js";
 import { pullResources } from "../resources.js";
 import { writeDslTypes } from "../dsl/dsl-types.js";
 import {
-  generateSpec,
   LocalState,
   localTestDirName,
   migrateLegacyTestLayout,
-  toLocalMetadata,
   writeLocalTest,
 } from "../dsl/local-format.js";
 import {
@@ -53,15 +50,13 @@ function existingTestDir(outputDir: string, testFolderId: string, testcaseId: st
     if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
     const testDir = path.join(folderDir, entry.name);
     migrateLegacyTestLayout(testDir);
-    const metadataPath = path.join(testDir, "header.yaml");
-    if (!fs.existsSync(metadataPath)) continue;
+    const statePath = path.join(testDir, ".sync", "baseline.json");
+    if (!fs.existsSync(statePath)) continue;
     try {
-      const metadata = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
-      if (String(metadata.testcase ?? metadata.testcaseId ?? "") === String(testcaseId)) {
-        return testDir;
-      }
+      const state = JSON.parse(fs.readFileSync(statePath, "utf8")) as LocalState;
+      if (String(state.serverPayload.testcaseId) === String(testcaseId)) return testDir;
     } catch {
-      // Ignore malformed local metadata here; pull will recreate a clean directory if needed.
+      // Ignore malformed baseline.
     }
   }
   return undefined;
