@@ -174,7 +174,14 @@ interface CerberusDataLib {
     csvUrl?: string;
     separator?: string;
     ignoreFirstLine?: boolean;
-    subData?: Array<Record<string, unknown>>;
+    /**
+     * Compact local DataLib representation:
+     * INTERNAL -> value
+     * SERVICE -> parsingAnswer
+     * SQL/DATABASE -> column
+     * FILE/CSV -> columnPosition (column number)
+     */
+    data: Record<string, string | number | boolean>;
 }
 
 declare function test(
