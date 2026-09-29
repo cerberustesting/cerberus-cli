@@ -112,6 +112,20 @@ export interface TestCaseProperty {
     countries?: TestCaseCountry[];
 }
 
+export interface TestCaseLabel {
+    id?: number;
+    system?: string;
+    label: string;
+    type?: string;
+    color?: string;
+    parentLabelID?: number;
+    requirementType?: string;
+    requirementStatus?: string;
+    requirementCriticality?: string;
+    description?: string;
+    detailedDescription?: string;
+}
+
 /** Données détaillées d’un cas de test Cerberus */
 export interface TestCaseDetailed {
     testFolderId: string;
@@ -134,6 +148,7 @@ export interface TestCaseDetailed {
     dateModif?: string;
     steps?: TestCaseStep[];
     properties?: TestCaseProperty[];
+    labels?: TestCaseLabel[];
 }
 
 /** Modèle simplifié pour la liste des testcases d’une application */
