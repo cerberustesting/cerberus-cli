@@ -30,7 +30,7 @@ function backupLocal(testDir: string): string {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const dir = path.join(testDir, ".sync", "backups", `${stamp}-local`);
     fs.mkdirSync(dir, { recursive: true });
-    for (const f of ["header.yaml", "script.ts"]) fs.copyFileSync(path.join(testDir, f), path.join(dir, f));
+    for (const f of ["testcase.ts"]) fs.copyFileSync(path.join(testDir, f), path.join(dir, f));
     return dir;
 }
 
