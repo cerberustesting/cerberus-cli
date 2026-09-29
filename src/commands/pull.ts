@@ -8,6 +8,7 @@ import { writeDslTypes } from "../dsl/dsl-types.js";
 import {
   generateSpec,
   LocalState,
+  localTestDirName,
   toLocalMetadata,
   writeLocalTest,
 } from "../dsl/local-format.js";
@@ -73,7 +74,7 @@ export async function pullTests(): Promise<void> {
   let conflicted = 0;
 
   for (const test of json.data) {
-    const testDir = path.join(outputDir, test.testFolderId, test.testcaseId);
+    const testDir = path.join(outputDir, test.testFolderId, localTestDirName(test));
     const detailRes = await fetch(
       `${config.apiUrl}/testcases/${encodeURIComponent(test.testFolderId)}/${encodeURIComponent(test.testcaseId)}`,
       {
