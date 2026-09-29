@@ -142,9 +142,27 @@ export async function pushCommand(refs: string[], opts: PushOptions): Promise<nu
         continue;
       }
 
-      writeLocalTest(testDir, afterCreate);
+      let finalDir = testDir;
+      const serverLabel = `${afterCreate.testFolderId}/${afterCreate.testcaseId}`;
+      if (serverLabel !== label) {
+        const baseDir = path.dirname(path.dirname(testDir));
+        const targetDir = path.join(baseDir, afterCreate.testFolderId, afterCreate.testcaseId);
+        if (fs.existsSync(targetDir)) {
+          console.error(
+            `❌ ${label} : le serveur a créé ${serverLabel}, mais le dossier local cible existe déjà : ${targetDir}`
+          );
+          failed++;
+          continue;
+        }
+        fs.mkdirSync(path.dirname(targetDir), { recursive: true });
+        fs.renameSync(testDir, targetDir);
+        finalDir = targetDir;
+        console.log(`   ↪ dossier local renommé en ${serverLabel}`);
+      }
+
+      writeLocalTest(finalDir, afterCreate);
       console.log(
-        `🆕 ${label} : créé sur le serveur comme ${afterCreate.testFolderId}/${afterCreate.testcaseId} (v${afterCreate.version}), vérifié.`
+        `🆕 ${label} : créé sur le serveur comme ${serverLabel} (v${afterCreate.version}), vérifié.`
       );
       pushed++;
       continue;
