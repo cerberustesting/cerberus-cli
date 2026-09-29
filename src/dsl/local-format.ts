@@ -238,6 +238,17 @@ export function generateSpec(test: TestCaseDetailed): string {
   return lines.join("\n");
 }
 
+export function localTestDirName(test: Pick<TestCaseDetailed, "testcaseId" | "description">): string {
+  const description = String(test.description ?? "")
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "")
+    .slice(0, 100);
+
+  return description ? `${test.testcaseId} - ${description}` : String(test.testcaseId);
+}
+
 export function writeLocalTest(testDir: string, test: TestCaseDetailed): void {
   fs.mkdirSync(path.join(testDir, ".cerberus"), { recursive: true });
   fs.writeFileSync(path.join(testDir, "cerberus.yaml"), YAML.stringify(toLocalMetadata(test)), "utf8");
