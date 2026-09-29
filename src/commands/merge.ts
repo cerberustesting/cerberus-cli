@@ -28,9 +28,9 @@ function printConflict(c: Conflict): void {
 /** Copie les fichiers locaux avant fusion pour pouvoir revenir en arrière. */
 function backupLocal(testDir: string): string {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const dir = path.join(testDir, ".cerberus", "backups", `${stamp}-local`);
+    const dir = path.join(testDir, ".sync", "backups", `${stamp}-local`);
     fs.mkdirSync(dir, { recursive: true });
-    for (const f of ["cerberus.yaml", "test.spec.ts"]) fs.copyFileSync(path.join(testDir, f), path.join(dir, f));
+    for (const f of ["header.yaml", "script.ts"]) fs.copyFileSync(path.join(testDir, f), path.join(dir, f));
     return dir;
 }
 
@@ -54,7 +54,7 @@ export async function mergeCommand(refs: string[], opts: MergeOptions): Promise<
         const state = readState(testDir);
         const label = testDir.split(path.sep).slice(-2).join("/");
         if (!state) {
-            console.warn(`⚠️ ${label} : pas d'état de base (.cerberus/state.json), lancez 'pull'.`);
+            console.warn(`⚠️ ${label} : pas d'état de base (.sync/baseline.json), lancez 'pull'.`);
             continue;
         }
         const base = state.serverPayload;
@@ -98,7 +98,7 @@ export async function mergeCommand(refs: string[], opts: MergeOptions): Promise<
         writeLocalTest(testDir, result.merged);
         // la base devient l'état actuel du serveur : les écarts restants sont vos modifications à pousser
         writeState(testDir, server);
-        const dotDir = path.join(testDir, ".cerberus");
+        const dotDir = path.join(testDir, ".sync");
         for (const f of fs.readdirSync(dotDir)) if (/^conflict-v.*\.json$/.test(f)) fs.rmSync(path.join(dotDir, f));
         console.log(`   ✅ Fusionné. Sauvegarde de vos fichiers : ${path.relative(process.cwd(), backup)}`);
         merged++;
