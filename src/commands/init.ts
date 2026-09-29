@@ -21,20 +21,20 @@ function instructions(dir: string): string {
     return `${BLOCK_START}
 ## Tests Cerberus
 
-Les tests fonctionnels vivent dans \`${dir}/<testFolderId>/<testcaseId>.yaml\`
-et sont synchronisés avec le serveur Cerberus via le CLI \`cerberus-testing\`.
+Les tests fonctionnels vivent dans :
+- \`${dir}/<testFolderId>/<testcaseId>/test.spec.ts\` : scénario Playwright-like éditable.
+- \`${dir}/<testFolderId>/<testcaseId>/cerberus.yaml\` : métadonnées Cerberus.
+- \`${dir}/<testFolderId>/<testcaseId>/.cerberus/state.json\` : état technique de round-trip, ne pas éditer manuellement.
 
-- \`cerberus-testing pull\` : télécharge les tests (les fichiers modifiés localement sont ignorés,
-  un \`*.conflict-vN.yaml\` est créé si le serveur a une version plus récente).
-- \`cerberus-testing push\` : envoie les fichiers locaux vers le serveur.
-- La clé API n'est jamais dans le dépôt : \`cerberus-testing login\` ou \`CERBERUS_API_KEY\`.
+Commandes :
+- \`cerberus pull\` : télécharge et convertit les tests vers le format local.
+- \`cerberus validate\` : valide le DSL avant push.
+- \`cerberus push\` : reconstruit le payload Cerberus et l'envoie au serveur.
+- La clé API n'est jamais dans le dépôt : \`cerberus login\` ou \`CERBERUS_API_KEY\`.
 
-Règles pour modifier un test :
-- Ne pas modifier \`testFolderId\`, \`testcaseId\`, \`application\` (identifiants, lecture seule).
-- \`priority\` : 1 (bloquant) à 5 (mineur). \`status\` : WORKING, READY ou OBSOLETE.
-- Structure : \`steps[]\` → \`actions[]\` → \`controls[]\`. Garder les \`stepId\`/\`actionId\`/\`controlId\` cohérents.
-- Schéma : \`${dir}/.cerberus/cerberus-testcase.schema.json\`.
-- Ne pas éditer les fichiers \`*.conflict-*.yaml\` : résoudre le conflit puis les supprimer.
+Le DSL est volontairement contraint. Les actions courantes utilisent une syntaxe Playwright-like
+(\`page.goto\`, \`page.evaluate\`, \`page.waitForTimeout\`) et les primitives Cerberus
+utilisent \`cerberus.*\`. Les actions non mappées sont conservées avec \`cerberus.action(...)\`.
 ${BLOCK_END}
 `;
 }
@@ -79,7 +79,7 @@ function mergeVscodeSettings(root: string, schemaRel: string, dir: string): void
     }
     settings["yaml.schemas"] = {
         ...(settings["yaml.schemas"] ?? {}),
-        [schemaRel]: `${dir}/**/*.yaml`,
+        [schemaRel]: `${dir}/**/cerberus.yaml`,
     };
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n", "utf8");
