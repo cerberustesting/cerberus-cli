@@ -8,6 +8,9 @@ export interface CerberusConfig {
     apiVersion: string;
     defaultBaseDir: string;
     application?: string;
+    country?: string;
+    environment?: string;
+    robot?: string;
 }
 
 const CONFIG_FILE = "cerberus.config.json";
@@ -58,6 +61,9 @@ export function loadConfig(): CerberusConfig {
         apiVersion: project.apiVersion ?? "1",
         defaultBaseDir: project.defaultBaseDir ?? "./tests",
         application: project.application,
+        country: project.country,
+        environment: project.environment,
+        robot: project.robot,
     };
 }
 
