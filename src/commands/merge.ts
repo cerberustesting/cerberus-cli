@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { loadConfig } from "../config.js";
+import { loadConfig, testsDir } from "../config.js";
 import { findLocalTestDirs, readLocalTest, writeLocalTest } from "../dsl/local-format.js";
 import { Conflict, mergeTests, Policy } from "../merge.js";
 import { fetchServerTest, readState, sameContent, selectTestDirs, testRef, writeState } from "../sync.js";
@@ -43,7 +43,7 @@ export async function mergeCommand(refs: string[], opts: MergeOptions): Promise<
     const policy: Policy = opts.ours ? "ours" : opts.theirs ? "theirs" : "abort";
 
     const config = loadConfig();
-    const dirs = selectTestDirs(findLocalTestDirs(config.defaultBaseDir), refs);
+    const dirs = selectTestDirs(findLocalTestDirs(testsDir(config)), refs);
     if (dirs.length === 0) throw new Error("Aucun testcase local. Lancez 'pull' d'abord.");
 
     let merged = 0;
