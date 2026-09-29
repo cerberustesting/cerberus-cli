@@ -23,10 +23,10 @@ function instructions(dir: string): string {
 ## Tests Cerberus
 
 Le repository local Cerberus vit dans :
-- \`${dir}/<testFolderId>/<testcaseId>/test.spec.ts\` : scénario Playwright-like éditable.
-- \`${dir}/<testFolderId>/<testcaseId>/cerberus.yaml\` : métadonnées Cerberus.
-- \`${dir}/<testFolderId>/<testcaseId>/.cerberus/state.json\` : état technique de round-trip, ne pas éditer manuellement.
-- \`${dir}/<testFolderId>/<testcaseId>/.cerberus/conflict-vN.json\` : version serveur en conflit avec vos modifications locales, à résoudre puis supprimer.
+- \`${dir}/<testFolderId>/<testcaseId - description>/test.spec.ts\` : scénario Playwright-like éditable.
+- \`${dir}/<testFolderId>/<testcaseId - description>/cerberus.yaml\` : métadonnées Cerberus.
+- \`${dir}/<testFolderId>/<testcaseId - description>/.cerberus/state.json\` : état technique de round-trip, ne pas éditer manuellement.
+- \`${dir}/<testFolderId>/<testcaseId - description>/.cerberus/conflict-vN.json\` : version serveur en conflit avec vos modifications locales, à résoudre puis supprimer.
 - \`${dir}/.cerberus/cerberus-dsl.d.ts\` et \`${dir}/tsconfig.json\` : types du DSL pour l'IDE, régénérés par \`pull\`, ne pas éditer.
 
 Commandes :
