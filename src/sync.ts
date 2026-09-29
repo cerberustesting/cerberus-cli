@@ -37,16 +37,16 @@ export function testRef(t: { testFolderId: string; testcaseId: string }): string
 
 export function readState(testDir: string): LocalState | null {
     try {
-        return JSON.parse(fs.readFileSync(path.join(testDir, ".cerberus", "state.json"), "utf8")) as LocalState;
+        return JSON.parse(fs.readFileSync(path.join(testDir, ".sync", "baseline.json"), "utf8")) as LocalState;
     } catch {
         return null;
     }
 }
 
-/** Les fichiers locaux diffèrent-ils de ce que produirait le dernier état synchronisé (state.json) ? */
+/** Les fichiers locaux diffèrent-ils de ce que produirait le dernier état synchronisé (baseline.json) ? */
 export function isLocallyModified(testDir: string): boolean {
-    const metadataPath = path.join(testDir, "cerberus.yaml");
-    const specPath = path.join(testDir, "test.spec.ts");
+    const metadataPath = path.join(testDir, "header.yaml");
+    const specPath = path.join(testDir, "script.ts");
     if (!fs.existsSync(metadataPath) || !fs.existsSync(specPath)) return false;
     const state = readState(testDir);
     if (!state) return fs.existsSync(metadataPath) && fs.existsSync(specPath);
@@ -62,7 +62,7 @@ export function isLocallyModified(testDir: string): boolean {
 
 /** Copie l'état serveur avant d'être écrasé : dernier filet de sécurité. Renvoie le chemin. */
 export function backupServerState(testDir: string, server: TestCaseDetailed): string {
-    const dir = path.join(testDir, ".cerberus", "backups");
+    const dir = path.join(testDir, ".sync", "backups");
     fs.mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const file = path.join(dir, `${stamp}-server-v${server.version}.json`);
@@ -312,11 +312,11 @@ export function describeChanges(base: TestCaseDetailed, local: TestCaseDetailed)
     return out;
 }
 
-/** Remplace la base (state.json) sans toucher aux fichiers locaux. */
+/** Remplace la base (baseline.json) sans toucher aux fichiers locaux. */
 export function writeState(testDir: string, serverPayload: TestCaseDetailed): void {
     const state: LocalState = { formatVersion: 1, serverPayload };
-    fs.mkdirSync(path.join(testDir, ".cerberus"), { recursive: true });
-    fs.writeFileSync(path.join(testDir, ".cerberus", "state.json"), JSON.stringify(state, null, 2) + "\n", "utf8");
+    fs.mkdirSync(path.join(testDir, ".sync"), { recursive: true });
+    fs.writeFileSync(path.join(testDir, ".sync", "baseline.json"), JSON.stringify(state, null, 2) + "\n", "utf8");
 }
 
 /** Sélectionne les dossiers de tests : accepte le nom de dossier lisible ou la référence technique « Dossier/Id ». */
@@ -338,7 +338,7 @@ export function selectTestDirs(allDirs: string[], refs: string[]): string[] {
         }
 
         const byMetadata = allDirs.find((d) => {
-            const metadataPath = path.join(d, "cerberus.yaml");
+            const metadataPath = path.join(d, "header.yaml");
             if (!fs.existsSync(metadataPath)) return false;
             try {
                 const metadata = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
