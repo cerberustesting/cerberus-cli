@@ -149,13 +149,17 @@ export function withRequiredDefaults<T extends TestCaseDetailed>(test: T): T {
 
 /** Envoie un testcase existant (PUT). */
 export async function putServerTest(config: CerberusConfig, test: TestCaseDetailed, serverVersion: number | string): Promise<Response> {
+    const prepared = withRequiredDefaults(test) as TestCaseDetailed & { labels?: unknown[] };
+    // LabelDTOV001.id is GET-only in the current public API. Sending testcase labels through
+    // the PUT view would therefore lose their IDs. Omit them so the server preserves existing links.
+    const { labels: _labels, ...payloadWithoutLabels } = prepared as any;
     return fetch(testUrl(config, test), {
         method: "PUT",
         // pas de suivi automatique : une redirection change la méthode ou perd le corps
         redirect: "manual",
         headers: await baseHeaders(config, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-            ...withRequiredDefaults(test),
+            ...payloadWithoutLabels,
             // le serveur ajoute 1 à la version reçue : on part de sa version réelle pour ne jamais la faire reculer
             version: Number(serverVersion),
         }),
@@ -166,7 +170,7 @@ export async function createServerTest(config: CerberusConfig, test: TestCaseDet
     // À la création, l'identifiant du testcase est toujours attribué par Cerberus.
     // Le nom/ID local éventuel n'est qu'un identifiant provisoire de travail et ne doit
     // jamais imposer une valeur qui pourrait déjà être utilisée dans le test folder.
-    const { testcaseId: _localDraftId, ...creationPayload } = test;
+    const { testcaseId: _localDraftId, labels: _labels, ...creationPayload } = test as TestCaseDetailed & { labels?: unknown[] };
 
     return fetch(`${config.apiUrl}/testcases`, {
         method: "POST",
