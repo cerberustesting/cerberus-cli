@@ -140,7 +140,7 @@ function mergeVscodeSettings(root: string, schemaRel: string, dir: string): void
 
 function ensureWorkspaceLayout(root: string, dir: string): void {
     const workspace = path.join(root, dir);
-    for (const name of ["tests", "applicationObjects", "services", "datalib", "labels"]) {
+    for (const name of ["tests", "applicationObjects", "services", "datalib"]) {
         const target = path.join(workspace, name);
         fs.mkdirSync(target, { recursive: true });
         const keep = path.join(target, ".gitkeep");
@@ -168,7 +168,7 @@ export function initCommand(opts: InitOptions): void {
     }
 
     ensureWorkspaceLayout(root, dir);
-    console.log("✅ Workspace Cerberus créé (tests, applicationObjects, services, datalib, labels)");
+    console.log("✅ Workspace Cerberus créé (tests, applicationObjects, services, datalib)");
 
     const schemaDir = path.join(root, dir, ".cerberus");
     fs.mkdirSync(schemaDir, { recursive: true });
