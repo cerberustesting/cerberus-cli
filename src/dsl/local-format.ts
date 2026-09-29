@@ -183,19 +183,19 @@ function renderAction(action: TestAction, indent = "        "): string[] {
         ? [`${indent}await cerberus.do(${expression}, ${renderMetadata(metadata)});`]
         : [`${indent}await ${expression};`];
     } else {
+      const options: string[] = [];
+      if (action.value1 !== undefined) options.push(`value1: ${renderDslValue(action.value1)}`);
+      if (action.value2 !== undefined) options.push(`value2: ${renderDslValue(action.value2)}`);
+      if (action.value3 !== undefined) options.push(`value3: ${renderDslValue(action.value3)}`);
+      if (action.conditionOperator !== undefined) options.push(`conditionOperator: ${literal(action.conditionOperator)}`);
+      if (action.isFatal !== undefined) options.push(`isFatal: ${literal(action.isFatal)}`);
+      if (action.doScreenshotBefore !== undefined) options.push(`doScreenshotBefore: ${literal(action.doScreenshotBefore)}`);
+      if (action.doScreenshotAfter !== undefined) options.push(`doScreenshotAfter: ${literal(action.doScreenshotAfter)}`);
+      if (action.waitBefore !== undefined) options.push(`waitBefore: ${literal(action.waitBefore)}`);
+      if (action.waitAfter !== undefined) options.push(`waitAfter: ${literal(action.waitAfter)}`);
+      if (action.description !== undefined) options.push(`description: ${literal(action.description)}`);
       lines = [
-        `${indent}await cerberus.action(${literal(action.action)}, ${JSON.stringify({
-          value1: action.value1,
-          value2: action.value2,
-          value3: action.value3,
-          conditionOperator: action.conditionOperator,
-          isFatal: action.isFatal,
-          doScreenshotBefore: action.doScreenshotBefore,
-          doScreenshotAfter: action.doScreenshotAfter,
-          waitBefore: action.waitBefore,
-          waitAfter: action.waitAfter,
-          description: action.description,
-        })});`,
+        `${indent}await cerberus.action(${literal(action.action)}, { ${options.join(", ")} });`,
       ];
     }
   }
@@ -412,7 +412,10 @@ function parseObjectExpression(arg: ts.Expression | undefined): Record<string, u
       ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
     if (!key) continue;
 
-    const value = parseLiteral(prop.initializer);
+    const value =
+      parseLiteral(prop.initializer) ??
+      propertyReference(prop.initializer) ??
+      datalibReference(prop.initializer);
     if (value !== undefined) result[key] = value;
   }
 
