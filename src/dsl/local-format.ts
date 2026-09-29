@@ -92,6 +92,11 @@ function applicationObjectName(value: unknown): string | undefined {
   return match?.[1];
 }
 
+function datalibExpression(value: unknown): string | undefined {
+  const match = String(value ?? "").match(/^%datalib\.([^.]+)\.([^.]+)%$/);
+  return match ? `cerberus.datalib(${literal(match[1])}).value(${literal(match[2])})` : undefined;
+}
+
 function playwrightExpression(action: TestAction): string | undefined {
   switch (action.action) {
     case "openUrl":
@@ -99,9 +104,10 @@ function playwrightExpression(action: TestAction): string | undefined {
 
     case "type": {
       const objectName = applicationObjectName(action.value1);
+      const value = datalibExpression(action.value2) ?? literal(action.value2);
       return objectName
-        ? `cerberus.object(${literal(objectName)}).fill(${literal(action.value2)})`
-        : `page.locator(${literal(action.value1)}).fill(${literal(action.value2)})`;
+        ? `cerberus.object(${literal(objectName)}).fill(${value})`
+        : `page.locator(${literal(action.value1)}).fill(${value})`;
     }
 
     case "click": {
@@ -311,6 +317,22 @@ function stringArg(call: ts.CallExpression, index: number): string | undefined {
   return undefined;
 }
 
+function datalibReference(expression: ts.Expression | undefined): string | undefined {
+  if (!expression || !ts.isCallExpression(expression)) return undefined;
+  if (!ts.isPropertyAccessExpression(expression.expression) || expression.expression.name.text !== "value") return undefined;
+  const receiver = expression.expression.expression;
+  if (!ts.isCallExpression(receiver) || !ts.isPropertyAccessExpression(receiver.expression)) return undefined;
+  if (!ts.isIdentifier(receiver.expression.expression) || receiver.expression.expression.text !== "cerberus") return undefined;
+  if (receiver.expression.name.text !== "datalib") return undefined;
+  const name = stringArg(receiver, 0);
+  const subData = stringArg(expression, 0);
+  return name && subData ? `%datalib.${name}.${subData}%` : undefined;
+}
+
+function dslValueArg(call: ts.CallExpression, index: number): string | undefined {
+  return stringArg(call, index) ?? datalibReference(call.arguments[index]);
+}
+
 function sourceLine(source: ts.SourceFile, node: ts.Node): number {
   return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
 }
@@ -413,7 +435,7 @@ function parseMappedCall(
 
   if (ts.isIdentifier(receiver) && receiver.text === "page") {
     if (method === "goto") {
-      const value = stringArg(call, 0);
+      const value = dslValueArg(call, 0);
       if (value === undefined) {
         issues.push({ file: source.fileName, line: sourceLine(source, call), message: "page.goto() requires a literal URL." });
         return undefined;
@@ -422,7 +444,7 @@ function parseMappedCall(
     }
 
     if (method === "waitForTimeout") {
-      const value = stringArg(call, 0);
+      const value = dslValueArg(call, 0);
       if (value === undefined) {
         issues.push({ file: source.fileName, line: sourceLine(source, call), message: "page.waitForTimeout() requires a literal duration." });
         return undefined;
@@ -447,7 +469,7 @@ function parseMappedCall(
   const objectValue = cerberusObjectValue(call);
   if (objectValue !== undefined) {
     if (method === "fill") {
-      const value = stringArg(call, 0);
+      const value = dslValueArg(call, 0);
       if (value === undefined) {
         issues.push({ file: source.fileName, line: sourceLine(source, call), message: "cerberus.object(...).fill() requires a literal value." });
         return undefined;
@@ -474,7 +496,7 @@ function parseMappedCall(
   const locator = locatorValue(call);
   if (locator !== undefined) {
     if (method === "fill") {
-      const value = stringArg(call, 0);
+      const value = dslValueArg(call, 0);
       if (value === undefined) {
         issues.push({ file: source.fileName, line: sourceLine(source, call), message: "locator.fill() requires a literal value." });
         return undefined;
