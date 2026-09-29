@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import YAML from "yaml";
 import { execSync } from "child_process";
-import { loadConfig } from "../config.js";
+import { loadConfig, testsDir, workspaceDir } from "../config.js";
 import { isLocallyModified } from "../sync.js";
 import { writeDslTypes } from "../dsl/dsl-types.js";
 import {
@@ -67,9 +67,10 @@ export async function pullTests(): Promise<void> {
   const config = loadConfig();
   if (!config.application) throw new Error("application manquant dans cerberus.config.json");
 
-  const outputDir = path.resolve(config.defaultBaseDir);
+  const workspace = workspaceDir(config);
+  const outputDir = testsDir(config);
   fs.mkdirSync(outputDir, { recursive: true });
-  writeDslTypes(outputDir);
+  writeDslTypes(workspace);
 
   console.log(`🔄 Récupération des tests depuis ${config.apiUrl}...`);
 
@@ -147,7 +148,7 @@ export async function pullTests(): Promise<void> {
     existed ? updated++ : created++;
   }
 
-  initLocalGitRepo(outputDir);
+  initLocalGitRepo(workspace);
 
   console.log(`
 ✅ Pull terminé :
