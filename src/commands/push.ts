@@ -82,6 +82,17 @@ export async function pushCommand(refs: string[], opts: PushOptions): Promise<nu
 
     const state = readState(testDir);
 
+    const localLabels = data.labels ?? [];
+    const baselineLabels = state?.serverPayload.labels ?? [];
+    if (!sameContent(localLabels, baselineLabels)) {
+      console.error(
+        `⛔ ${label} non poussé : les tags Playwright modifient les labels du testcase, mais le contrat actuel du PUT testcase ne permet pas encore de synchroniser cette relation de façon sûre.\n` +
+        "   Le core doit accepter LabelDTOV001.id en PUT/POST et traiter labels: [] comme une suppression explicite."
+      );
+      blocked++;
+      continue;
+    }
+
     // 3. le serveur existe-t-il / a-t-il changé ?
     let server;
     try {
