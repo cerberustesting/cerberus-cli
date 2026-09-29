@@ -86,7 +86,7 @@ interface CerberusStep {
     library(ref: { testFolder: string; testcase: string; step: number; description?: string }): void;
 }
 
-interface CerberusDataLib {
+interface CerberusDataLibValues {
     value(name: string, subData: string): string;
 }
 
@@ -98,7 +98,7 @@ interface CerberusScriptContext {
     control: CerberusControl;
     property: CerberusProperty;
     object: typeof object;
-    datalib: CerberusDataLib;
+    datalib: CerberusDataLibValues;
 }
 
 interface CerberusTestcaseDefinition {
@@ -151,7 +151,7 @@ interface CerberusService {
     contents?: Array<Record<string, unknown>>;
 }
 
-interface CerberusDataLibResource {
+interface CerberusDataLib {
     id?: number;
     name: string;
     system?: string;
@@ -174,7 +174,7 @@ interface CerberusDataLibResource {
     ignoreFirstLine?: boolean;
     data: Record<string, string | number | boolean>;
 }
-`
+`;
 
 const TSCONFIG = {
     compilerOptions: {
