@@ -71,8 +71,17 @@ interface CerberusRequest {
     delete(url: string, options?: CerberusRequestOptions): Promise<CerberusApiResponse>;
 }
 
+interface CerberusLibraryStepRef {
+    testFolder: string;
+    testcase: string;
+    step: number;
+    description?: string;
+}
+
 interface Cerberus {
     step(description: string, body: () => Promise<void>): Promise<void>;
+    /** Référence un step de librairie Cerberus sans dupliquer ses actions. */
+    libraryStep(ref: CerberusLibraryStepRef): Promise<void>;
     /** Enrichit une action Playwright-like avec les métadonnées d'exécution Cerberus. */
     do<T>(action: Promise<T>, metadata?: CerberusMetadata): Promise<T>;
     /** Action Cerberus non mappée sur page.*. */
