@@ -936,8 +936,17 @@ export function readLocalTest(testDir: string): { data: TestCaseDetailed; issues
     ? JSON.parse(fs.readFileSync(baselinePath(testDir), "utf8")) as LocalState
     : draftState(testDir);
 
-  const source = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const issues: ValidationIssue[] = source.parseDiagnostics.map((diag) => ({
+  const sourceText = fs.readFileSync(file, "utf8");
+  const source = ts.createSourceFile(file, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const syntaxDiagnostics = ts.transpileModule(sourceText, {
+    fileName: file,
+    reportDiagnostics: true,
+    compilerOptions: {
+      target: ts.ScriptTarget.Latest,
+      module: ts.ModuleKind.ESNext,
+    },
+  }).diagnostics ?? [];
+  const issues: ValidationIssue[] = syntaxDiagnostics.map((diag: ts.Diagnostic) => ({
     file,
     line: diag.start === undefined ? undefined : source.getLineAndCharacterOfPosition(diag.start).line + 1,
     message: ts.flattenDiagnosticMessageText(diag.messageText, "\n"),
