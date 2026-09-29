@@ -54,9 +54,32 @@ export function loadConfig(): CerberusConfig {
 }
 
 
+export interface CerberusWorkspacePaths {
+    root: string;
+    tests: string;
+    applicationObjects: string;
+    services: string;
+    datalib: string;
+    labels: string;
+    internal: string;
+}
+
+export function workspacePaths(config: Pick<CerberusConfig, "defaultBaseDir">): CerberusWorkspacePaths {
+    const root = path.resolve(config.defaultBaseDir);
+    return {
+        root,
+        tests: path.join(root, "tests"),
+        applicationObjects: path.join(root, "applicationObjects"),
+        services: path.join(root, "services"),
+        datalib: path.join(root, "datalib"),
+        labels: path.join(root, "labels"),
+        internal: path.join(root, ".cerberus"),
+    };
+}
+
 /** Racine du workspace Cerberus local. */
 export function workspaceDir(config: Pick<CerberusConfig, "defaultBaseDir">): string {
-    return path.resolve(config.defaultBaseDir);
+    return workspacePaths(config).root;
 }
 
 function looksLikeLegacyTestsRoot(baseDir: string): boolean {
@@ -83,7 +106,7 @@ function looksLikeLegacyTestsRoot(baseDir: string): boolean {
  */
 export function testsDir(config: Pick<CerberusConfig, "defaultBaseDir">): string {
     const root = workspaceDir(config);
-    const nested = path.join(root, "tests");
+    const nested = workspacePaths(config).tests;
     if (fs.existsSync(nested)) return nested;
     if (looksLikeLegacyTestsRoot(root)) return root;
     return nested;
