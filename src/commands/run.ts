@@ -32,17 +32,44 @@ function parseRef(arg: string): Ref {
     return { testFolderId, testcaseId };
 }
 
-/** Tous les testcases locaux d'un dossier (fichiers .yaml, hors conflits). */
+/** Tous les testcases locaux d'un dossier.
+ * Supporte le nouveau layout <folder>/<testcase>/cerberus.yaml
+ * et, pour compatibilité, l'ancien layout <folder>/<testcase>.yaml.
+ */
 function refsFromFolder(config: CerberusConfig, folder: string): Ref[] {
     const dir = path.join(config.defaultBaseDir, folder);
     if (!fs.existsSync(dir)) throw new Error(`Dossier local introuvable : ${dir}`);
-    return fs
-        .readdirSync(dir)
-        .filter((f) => /\.ya?ml$/.test(f) && !f.includes(".conflict-"))
-        .map((f) => {
-            const data = YAML.parse(fs.readFileSync(path.join(dir, f), "utf8"));
-            return { testFolderId: data.testFolderId ?? folder, testcaseId: data.testcaseId ?? f.replace(/\.ya?ml$/, "") };
-        });
+
+    const refs: Ref[] = [];
+
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name.startsWith(".")) continue;
+
+        if (entry.isDirectory()) {
+            const metadataPath = path.join(dir, entry.name, "cerberus.yaml");
+            if (!fs.existsSync(metadataPath)) continue;
+
+            const data = YAML.parse(fs.readFileSync(metadataPath, "utf8"));
+            refs.push({
+                testFolderId: data.testFolder ?? data.testFolderId ?? folder,
+                testcaseId: data.testcase ?? data.testcaseId ?? entry.name,
+            });
+            continue;
+        }
+
+        if (entry.isFile() && /\.ya?ml$/.test(entry.name) && !entry.name.includes(".conflict-")) {
+            const data = YAML.parse(fs.readFileSync(path.join(dir, entry.name), "utf8"));
+            refs.push({
+                testFolderId: data.testFolderId ?? data.testFolder ?? folder,
+                testcaseId:
+                    data.testcaseId ??
+                    data.testcase ??
+                    entry.name.replace(/\.ya?ml$/, ""),
+            });
+        }
+    }
+
+    return refs;
 }
 
 async function api<T>(config: CerberusConfig, method: string, url: string, body?: unknown): Promise<T> {
