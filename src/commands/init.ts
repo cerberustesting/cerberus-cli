@@ -56,6 +56,7 @@ Le DSL est volontairement contraint :
 - \`request.*\` est réservé au vocabulaire Playwright API réel ; un appel HTTP n'est accepté au push que s'il existe un mapping
   Cerberus réellement équivalent ;
 - \`cerberus.do(playwrightAction, metadata)\` ajoute description, condition, screenshot, fatalité ou waits sans remplacer l'action Playwright ;
+- \`cerberus.libraryStep({ testFolder, testcase, step, description? })\` conserve une référence vers un step de librairie sans dupliquer ses actions ;
 - \`cerberus.*\` porte les capacités propres à Cerberus ; une action sans mapping Playwright reste \`cerberus.action(...)\`.
 Les URL, durées, noms de propriété/action/contrôle doivent être des littéraux : \`cerberus validate\` refuse le reste.
 Un \`cerberus.control(...)\` doit suivre l'action qu'il vérifie.
@@ -66,6 +67,7 @@ Quand l'utilisateur demande « convertis en Cerberus », « Cerberusify », « c
 1. lancer \`cerberus prepare <dossier/id> --json\` pour analyser le Playwright existant ;
 2. conserver autant que possible le code Playwright natif ;
 3. regrouper les actions en \`cerberus.step(...)\` selon leur intention fonctionnelle, et non mécaniquement une action par step ;
+   si le step provient d'une librairie Cerberus existante, utiliser \`cerberus.libraryStep(...)\` et ne jamais recopier ses actions ;
 4. ajouter \`cerberus.do(action, { description: "..." })\` seulement quand la description ou une metadata Cerberus apporte
    une valeur utile au reporting ou à l'exécution ; ne pas wrapper systématiquement toutes les actions ;
 5. utiliser \`cerberus.*\` uniquement pour une capacité propre à Cerberus ou lorsqu'aucun mapping Playwright équivalent n'existe ;
