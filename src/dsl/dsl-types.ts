@@ -97,19 +97,37 @@ interface CerberusDataLibRef {
     value(subData: string): string;
 }
 
+type CerberusPropertyNature = "STATIC" | "RANDOM" | "RANDOMNEW" | "NOTINUSE" | "NotInUse";
+
 interface CerberusPropertyDefinition {
     type: string;
     value1?: string;
     value2?: string;
     value3?: string;
-    length?: string;
+    database?: string;
+    length?: string | number;
     rowLimit?: number;
-    nature?: string;
-    rank?: number | string;
+    nature?: CerberusPropertyNature;
+    rank?: number;
+    retryNb?: number;
+    retryPeriod?: number;
+    cacheExpire?: number;
+    description?: string;
 }
 
-interface CerberusPropertySource {
-    readonly __cerberusPropertySource: true;
+interface CerberusPropertyBuilder {
+    value1(value: string): CerberusPropertyBuilder;
+    value2(value: string): CerberusPropertyBuilder;
+    value3(value: string): CerberusPropertyBuilder;
+    database(name: string): CerberusPropertyBuilder;
+    length(value: string | number): CerberusPropertyBuilder;
+    rowLimit(value: number): CerberusPropertyBuilder;
+    nature(value: CerberusPropertyNature): CerberusPropertyBuilder;
+    rank(value: number): CerberusPropertyBuilder;
+    retryNb(value: number): CerberusPropertyBuilder;
+    retryPeriod(milliseconds: number): CerberusPropertyBuilder;
+    cacheExpire(seconds: number): CerberusPropertyBuilder;
+    description(value: string): CerberusPropertyBuilder;
 }
 
 interface Cerberus {
@@ -121,13 +139,30 @@ interface Cerberus {
     /** Référence une DataLib Cerberus dans une valeur. */
     datalib(name: string): CerberusDataLibRef;
     /** Déclare les propriétés du testcase au début du test. */
-    properties(definitions: Record<string, string | number | CerberusPropertyDefinition | CerberusPropertySource>): void;
+    properties(definitions: Record<string, string | number | CerberusPropertyDefinition | CerberusPropertyBuilder>): void;
     /** Référence %property.NAME% dans une valeur. */
     property(name: string): string;
-    /** Raccourci de déclaration d'une propriété getFromDataLib. */
-    fromDataLib(name: string): CerberusPropertySource;
-    /** Raccourci de déclaration d'une propriété getFromJS. */
-    fromJS(expression?: string): CerberusPropertySource;
+
+    /** Builders couvrant les types de propriété Cerberus non dépréciés. */
+    text(value?: string | number): CerberusPropertyBuilder;
+    fromJson(path: string): CerberusPropertyBuilder;
+    rawFromJson(path: string): CerberusPropertyBuilder;
+    fromSql(query: string): CerberusPropertyBuilder;
+    fromDataLib(name: string): CerberusPropertyBuilder;
+    fromJS(expression?: string): CerberusPropertyBuilder;
+    fromXml(xpath: string): CerberusPropertyBuilder;
+    rawFromXml(xpath: string): CerberusPropertyBuilder;
+    differencesFromXml(xpath: string): CerberusPropertyBuilder;
+    fromHtml(locator: string): CerberusPropertyBuilder;
+    fromHtmlVisible(locator: string): CerberusPropertyBuilder;
+    attributeFromHtml(locator: string): CerberusPropertyBuilder;
+    fromCookie(name: string): CerberusPropertyBuilder;
+    fromNetworkTraffic(path: string): CerberusPropertyBuilder;
+    fromGroovy(script: string): CerberusPropertyBuilder;
+    fromCommand(command: string): CerberusPropertyBuilder;
+    elementPosition(locator: string): CerberusPropertyBuilder;
+    otp(secret: string): CerberusPropertyBuilder;
+    fromExecutionObject(path: string): CerberusPropertyBuilder;
     /** Référence un step de librairie Cerberus sans dupliquer ses actions. */
     libraryStep(ref: CerberusLibraryStepRef): Promise<void>;
     /** Enrichit une action Playwright-like avec les métadonnées d'exécution Cerberus. */
