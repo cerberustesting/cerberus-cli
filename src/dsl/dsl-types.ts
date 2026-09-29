@@ -1,119 +1,27 @@
 import fs from "fs";
 import path from "path";
 
-const DSL_TYPES = `// Généré par Cerberus CLI : types du DSL pour l'IDE (ne pas éditer, régénéré par pull/init).
-// Le DSL est interprété par le CLI, pas exécuté par Playwright.
+const DSL_TYPES = `// Généré par Cerberus CLI : types du DSL natif Cerberus.
+// Le fichier testcase.ts est interprété par le CLI, pas exécuté.
 
 type CerberusFlag = boolean | "Y" | "N";
-
-interface CerberusActionOptions {
-    value1?: string;
-    value2?: string;
-    value3?: string;
-    conditionOperator?: string;
-    isFatal?: CerberusFlag;
-    doScreenshotBefore?: CerberusFlag;
-    doScreenshotAfter?: CerberusFlag;
-    waitBefore?: number;
-    waitAfter?: number;
-    description?: string;
-}
-
-interface CerberusMetadata {
-    description?: string;
-    condition?: string;
-    fatal?: boolean;
-    screenshot?: "before" | "after" | "both" | "never";
-    waitBefore?: number;
-    waitAfter?: number;
-}
-
-interface CerberusLocator {
-    click(): Promise<void>;
-    fill(value: string): Promise<void>;
-}
-
-interface CerberusPage {
-    /** Action Cerberus openUrl. L'URL doit être un littéral. */
-    goto(url: string): Promise<void>;
-    /** Sélecteur Playwright-like. */
-    locator(selector: string): CerberusLocator;
-    /** Action Cerberus wait. La durée doit être un littéral (ms). */
-    waitForTimeout(ms: number): Promise<void>;
-    /** Action Cerberus executeJS. Le corps de la fonction est envoyé tel quel au navigateur. */
-    evaluate(fn: () => unknown): Promise<void>;
-}
-
-interface CerberusRequestOptions {
-    data?: unknown;
-    headers?: Record<string, string>;
-    params?: Record<string, string | number | boolean>;
-    timeout?: number;
-    failOnStatusCode?: boolean;
-}
-
-interface CerberusApiResponse {
-    ok(): boolean;
-    status(): number;
-    text(): Promise<string>;
-    json(): Promise<unknown>;
-}
-
-interface CerberusRequest {
-    /**
-     * Vocabulaire réservé à l'API Playwright request.*.
-     * Ces appels ne sont convertis vers Cerberus que lorsqu'un mapping sémantiquement équivalent existe.
-     */
-    get(url: string, options?: CerberusRequestOptions): Promise<CerberusApiResponse>;
-    post(url: string, options?: CerberusRequestOptions): Promise<CerberusApiResponse>;
-    put(url: string, options?: CerberusRequestOptions): Promise<CerberusApiResponse>;
-    patch(url: string, options?: CerberusRequestOptions): Promise<CerberusApiResponse>;
-    delete(url: string, options?: CerberusRequestOptions): Promise<CerberusApiResponse>;
-}
-
-interface CerberusLibraryStepRef {
-    testFolder: string;
-    testcase: string;
-    step: number;
-    description?: string;
-}
-
-interface CerberusObjectRef {
-    click(): Promise<void>;
-    fill(value: string): Promise<void>;
-}
-
-interface CerberusServiceCallOptions {
-    kafkaEvents?: string | number;
-    kafkaWaitSeconds?: string | number;
-}
-
-interface CerberusServiceRef {
-    call(options?: CerberusServiceCallOptions): Promise<void>;
-}
-
-interface CerberusDataLibRef {
-    /** Référence directe à %datalib.NAME.SUBDATA%. */
-    value(subData: string): string;
-}
-
+type CerberusScreenshot = "before" | "after" | "both" | "never";
 type CerberusPropertyNature = "STATIC" | "RANDOM" | "RANDOMNEW" | "NOTINUSE" | "NotInUse";
 
-interface CerberusPropertyDefinition {
-    type: string;
-    value1?: string;
-    value2?: string;
-    value3?: string;
-    database?: string;
-    length?: string | number;
-    rowLimit?: number;
-    nature?: CerberusPropertyNature;
-    rank?: number;
-    retryNb?: number;
-    retryPeriod?: number;
-    cacheExpire?: number;
-    description?: string;
+interface CerberusFluentMetadata<T> {
+    description(value: string): T;
+    condition(value: string): T;
+    fatal(value: boolean): T;
+    screenshot(value: CerberusScreenshot): T;
+    waitBefore(ms: number): T;
+    waitAfter(ms: number): T;
+    value1(value: string): T;
+    value2(value: string): T;
+    value3(value: string): T;
 }
+
+interface CerberusActionBuilder extends CerberusFluentMetadata<CerberusActionBuilder> {}
+interface CerberusControlBuilder extends CerberusFluentMetadata<CerberusControlBuilder> {}
 
 interface CerberusPropertyBuilder {
     value1(value: string): CerberusPropertyBuilder;
@@ -128,13 +36,13 @@ interface CerberusPropertyBuilder {
     retryPeriod(milliseconds: number): CerberusPropertyBuilder;
     cacheExpire(seconds: number): CerberusPropertyBuilder;
     description(value: string): CerberusPropertyBuilder;
-    /** Scope la définition à un pays du testcase. */
     country(value: string): CerberusPropertyBuilder;
-    /** Scope la même définition à plusieurs pays du testcase. */
     countries(...values: string[]): CerberusPropertyBuilder;
 }
 
-interface CerberusPropertyFactory {
+interface CerberusProperty {
+    define(definitions: Record<string, string | number | CerberusPropertyBuilder>): void;
+    value(name: string): string;
     text(value?: string | number): CerberusPropertyBuilder;
     fromJson(path: string): CerberusPropertyBuilder;
     rawFromJson(path: string): CerberusPropertyBuilder;
@@ -156,35 +64,61 @@ interface CerberusPropertyFactory {
     fromExecutionObject(path: string): CerberusPropertyBuilder;
 }
 
-interface Cerberus {
-    step(description: string, body: () => Promise<void>): Promise<void>;
-    /** Référence un ApplicationObject Cerberus par son nom. */
-    object(name: string): CerberusObjectRef;
-    /** Référence un service Cerberus et déclenche l'action callService. */
-    service(name: string): CerberusServiceRef;
-    /** Référence une DataLib Cerberus dans une valeur. */
-    datalib(name: string): CerberusDataLibRef;
-    /** Déclare les propriétés du testcase au début du test. */
-    properties(definitions: Record<string, string | number | CerberusPropertyDefinition | CerberusPropertyBuilder>): void;
-    /** Référence %property.NAME% dans une valeur. */
-    property(name: string): string;
-
-    /** Référence un step de librairie Cerberus sans dupliquer ses actions. */
-    libraryStep(ref: CerberusLibraryStepRef): Promise<void>;
-    /** Enrichit une action Playwright-like avec les métadonnées d'exécution Cerberus. */
-    do<T>(action: Promise<T>, metadata?: CerberusMetadata): Promise<T>;
-    /** Action Cerberus non mappée sur page.*. */
-    action(name: string, options?: CerberusActionOptions): Promise<void>;
-    /** Contrôle Cerberus : doit suivre une action. */
-    control(name: string, options?: CerberusActionOptions): Promise<void>;
-    calculateProperty(property: string): Promise<void>;
+interface CerberusAction {
+    openUrl(url: string): CerberusActionBuilder;
+    feedField(element: string, value: string): CerberusActionBuilder;
+    click(element: string): CerberusActionBuilder;
+    wait(ms: number | string): CerberusActionBuilder;
+    executeJS(script: string): CerberusActionBuilder;
+    calculateProperty(name: string): CerberusActionBuilder;
+    callService(name: string, options?: { kafkaEvents?: string | number; kafkaWaitSeconds?: string | number }): CerberusActionBuilder;
+    custom(name: string, values?: { value1?: string; value2?: string; value3?: string }): CerberusActionBuilder;
+    [name: string]: ((...args: any[]) => CerberusActionBuilder);
 }
 
-interface CerberusTestOptions {
-    /** Playwright-compatible tags, mapped to existing Cerberus labels. */
-    tag?: string | string[];
-    annotation?: { type: string; description?: string } | Array<{ type: string; description?: string }>;
+interface CerberusControl {
+    custom(name: string, values?: { value1?: string; value2?: string; value3?: string }): CerberusControlBuilder;
+    [name: string]: ((...args: any[]) => CerberusControlBuilder);
 }
+
+interface CerberusStep {
+    (description: string, body: () => void): void;
+    library(ref: { testFolder: string; testcase: string; step: number; description?: string }): void;
+}
+
+interface CerberusDataLib {
+    value(name: string, subData: string): string;
+}
+
+declare function object(name: string): string;
+
+interface CerberusScriptContext {
+    step: CerberusStep;
+    action: CerberusAction;
+    control: CerberusControl;
+    property: CerberusProperty;
+    object: typeof object;
+    datalib: CerberusDataLib;
+}
+
+interface CerberusTestcaseDefinition {
+    name: string;
+    application: string;
+    tags?: string[];
+    countries?: string[];
+    priority?: string | number;
+    status?: string;
+    type?: string;
+    detailedDescription?: string;
+    active?: Array<"QA" | "UAT" | "PROD">;
+    script: (ctx: CerberusScriptContext) => void;
+}
+
+interface CerberusRoot {
+    testcase(definition: CerberusTestcaseDefinition): void;
+}
+
+declare const cerberus: CerberusRoot;
 
 interface CerberusApplicationObject {
     application: string;
@@ -217,7 +151,7 @@ interface CerberusService {
     contents?: Array<Record<string, unknown>>;
 }
 
-interface CerberusDataLib {
+interface CerberusDataLibResource {
     id?: number;
     name: string;
     system?: string;
@@ -238,32 +172,9 @@ interface CerberusDataLib {
     csvUrl?: string;
     separator?: string;
     ignoreFirstLine?: boolean;
-    /**
-     * Compact local DataLib representation:
-     * INTERNAL -> value
-     * SERVICE -> parsingAnswer
-     * SQL/DATABASE -> column
-     * FILE/CSV -> columnPosition (column number)
-     */
     data: Record<string, string | number | boolean>;
 }
-
-declare function test(
-    name: string,
-    options: CerberusTestOptions,
-    body: (fixtures: { page: CerberusPage; request: CerberusRequest; cerberus: Cerberus; property: CerberusPropertyFactory }) => Promise<void>
-): void;
-declare function test(
-    name: string,
-    body: (fixtures: { page: CerberusPage; request: CerberusRequest; cerberus: Cerberus; property: CerberusPropertyFactory }) => Promise<void>
-): void;
-
-// Le code d'action executeJS de Cerberus installe ces propriétés sur la console du navigateur.
-interface Console {
-    stdlog: Function;
-    logs: string[];
-}
-`;
+`
 
 const TSCONFIG = {
     compilerOptions: {
@@ -275,7 +186,7 @@ const TSCONFIG = {
         noEmit: true,
         skipLibCheck: true,
     },
-    include: [".cerberus/cerberus-dsl.d.ts", "**/*.spec.ts", "applicationObjects/**/*.ts", "services/**/*.ts", "datalib/**/*.ts"],
+    include: [".cerberus/cerberus-dsl.d.ts", "tests/**/testcase.ts", "applicationObjects/**/*.ts", "services/**/*.ts", "datalib/**/*.ts"],
 };
 
 /** Écrit les types du DSL et un tsconfig minimal (créé seulement s'il n'existe pas) dans le dossier des tests. */
