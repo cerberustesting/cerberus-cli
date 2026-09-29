@@ -63,10 +63,11 @@ function compactDataLib(payload: Payload): Payload {
   for (const item of payload.subData ?? []) {
     const key = String(item.subData ?? "").trim() || "default";
     let value: unknown;
+
     if (type === "INTERNAL") value = item.value;
     else if (type === "SERVICE") value = item.parsingAnswer;
-    else if (type === "DATABASE") value = item.column;
-    else if (type === "CSV" || type === "FILE") value = item.columnPosition;
+    else if (type === "SQL" || type === "DATABASE") value = item.column;
+    else if (type === "FILE" || type === "CSV") value = item.columnPosition;
     else value = item.value;
 
     if (value !== undefined && value !== null && String(value) !== "") {
@@ -74,15 +75,25 @@ function compactDataLib(payload: Payload): Payload {
     }
   }
 
-  const out: Payload = {};
-  for (const [key, value] of Object.entries(withoutVolatile(payload, ["subData"]))) {
-    if (value === undefined || value === null || value === "" || value === false) continue;
-    if (key === "id" || key === "name" || key === "type") {
-      out[key] = value;
-      continue;
-    }
-    out[key] = value;
+  const out: Payload = {
+    name: payload.name,
+    type: payload.type,
+  };
+
+  // Scope / configuration fields are shown only when meaningful.
+  for (const key of [
+    "system", "environment", "country", "group", "description",
+    "database", "script", "databaseUrl",
+    "service", "servicePath", "method", "envelope",
+    "databaseCsv", "csvUrl", "separator"
+  ]) {
+    const value = payload[key];
+    if (value !== undefined && value !== null && String(value) !== "") out[key] = value;
   }
+
+  if (payload.privateData === "Y" || payload.privateData === true) out.privateData = "Y";
+  if (payload.ignoreFirstLine === true) out.ignoreFirstLine = true;
+
   out.data = data;
   return out;
 }
@@ -101,8 +112,8 @@ function expandDataLib(local: Payload, baseline?: Payload): Payload {
 
     if (type === "INTERNAL") next.value = value;
     else if (type === "SERVICE") next.parsingAnswer = value;
-    else if (type === "DATABASE") next.column = value;
-    else if (type === "CSV" || type === "FILE") next.columnPosition = value;
+    else if (type === "SQL" || type === "DATABASE") next.column = value;
+    else if (type === "FILE" || type === "CSV") next.columnPosition = value;
     else next.value = value;
 
     return next;
@@ -111,6 +122,8 @@ function expandDataLib(local: Payload, baseline?: Payload): Payload {
   const { data: _data, ...rest } = local;
   return {
     ...(baseline ?? {}),
+    privateData: baseline?.privateData ?? "N",
+    ignoreFirstLine: baseline?.ignoreFirstLine ?? false,
     ...rest,
     subData,
   };
