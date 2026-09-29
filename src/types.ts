@@ -20,6 +20,9 @@ export interface TestControl {
     sort: number;
     conditionOperator: string;
     control: string;
+    value1?: string;
+    value2?: string;
+    value3?: string;
     isFatal: boolean | "Y" | "N";
     description?: string;
     doScreenshotBefore: boolean | "Y" | "N";
