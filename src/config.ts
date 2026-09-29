@@ -52,3 +52,39 @@ export function loadConfig(): CerberusConfig {
         authHeaders: () => authHeaders({ projectApiKey: project.apiKey }),
     };
 }
+
+
+/** Racine du workspace Cerberus local. */
+export function workspaceDir(config: Pick<CerberusConfig, "defaultBaseDir">): string {
+    return path.resolve(config.defaultBaseDir);
+}
+
+function looksLikeLegacyTestsRoot(baseDir: string): boolean {
+    if (!fs.existsSync(baseDir)) return false;
+    try {
+        for (const folder of fs.readdirSync(baseDir, { withFileTypes: true })) {
+            if (!folder.isDirectory() || folder.name.startsWith(".")) continue;
+            const folderPath = path.join(baseDir, folder.name);
+            for (const testcase of fs.readdirSync(folderPath, { withFileTypes: true })) {
+                if (!testcase.isDirectory() || testcase.name.startsWith(".")) continue;
+                if (fs.existsSync(path.join(folderPath, testcase.name, "cerberus.yaml"))) return true;
+            }
+        }
+    } catch {
+        return false;
+    }
+    return false;
+}
+
+/**
+ * Répertoire des testcases dans le workspace.
+ * Compatibilité : un ancien workspace sans /tests mais contenant directement les test folders
+ * continue d'être reconnu tant qu'il n'a pas migré.
+ */
+export function testsDir(config: Pick<CerberusConfig, "defaultBaseDir">): string {
+    const root = workspaceDir(config);
+    const nested = path.join(root, "tests");
+    if (fs.existsSync(nested)) return nested;
+    if (looksLikeLegacyTestsRoot(root)) return root;
+    return nested;
+}
