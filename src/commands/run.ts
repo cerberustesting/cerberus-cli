@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import YAML from "yaml";
-import { loadConfig, CerberusConfig } from "../config.js";
+import { loadConfig, CerberusConfig, testsDir } from "../config.js";
 import { ExecutionResult, toJUnit, verdictOf } from "../junit.js";
 
 export interface RunOptions {
@@ -36,7 +36,7 @@ function parseRef(arg: string): Ref {
  * et, pour compatibilité, l'ancien layout <folder>/<testcase>.yaml.
  */
 function refsFromFolder(config: CerberusConfig, folder: string): Ref[] {
-    const dir = path.join(config.defaultBaseDir, folder);
+    const dir = path.join(testsDir(config), folder);
     if (!fs.existsSync(dir)) throw new Error(`Dossier local introuvable : ${dir}`);
 
     const refs: Ref[] = [];
