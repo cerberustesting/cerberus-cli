@@ -84,7 +84,7 @@ Quand l'utilisateur demande « convertis en Cerberus », « Cerberusify », « c
 7. lancer \`cerberus validate\` et corriger toutes les erreurs ;
 8. lancer \`cerberus push <dossier/id> --dry-run\`, examiner les changements, puis \`cerberus push <dossier/id>\` si le résultat est cohérent.
 
-Pour créer un nouveau testcase local, créer \`${dir}/tests/<testFolder>/<nom-provisoire>/cerberus.yaml\` et \`test.spec.ts\` sans \`.cerberus/state.json\`. Après \`validate\`, un \`push\` crée le testcase sans envoyer de \`testcaseId\` : Cerberus attribue l'ID disponible, puis le CLI adopte cet ID et renomme le dossier local.
+Pour créer un nouveau testcase local, créer \`${dir}/tests/<testFolder>/<nom-provisoire>/header.yaml\` et \`script.ts\` sans \`.sync/baseline.json\`. Après \`validate\`, un \`push\` crée le testcase sans envoyer de \`testcaseId\` : Cerberus attribue l'ID disponible, puis le CLI adopte cet ID et renomme le dossier local.
 
 Le rôle de l'IA est d'ajouter la structure et les métadonnées Cerberus autour du Playwright existant, pas de réécrire inutilement
 le scénario ni d'en changer l'intention fonctionnelle.
@@ -132,7 +132,7 @@ function mergeVscodeSettings(root: string, schemaRel: string, dir: string): void
     }
     settings["yaml.schemas"] = {
         ...(settings["yaml.schemas"] ?? {}),
-        [schemaRel]: `${dir}/tests/**/cerberus.yaml`,
+        [schemaRel]: `${dir}/tests/**/header.yaml`,
     };
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n", "utf8");
@@ -179,7 +179,7 @@ export function initCommand(opts: InitOptions): void {
     writeDslTypes(path.join(root, dir));
     console.log(`✅ Types du DSL installés (${dir}/tsconfig.json + ${dir}/.cerberus/cerberus-dsl.d.ts)`);
 
-    ensureGitignore(root, ["cerberus.config.json", `${dir}/**/.cerberus/conflict-*.json`]);
+    ensureGitignore(root, ["cerberus.config.json", `${dir}/**/.sync/conflict-*.json`]);
 
     const block = instructions(dir);
     upsertBlock(path.join(root, "AGENTS.md"), block, "# Instructions pour les assistants IA\n\n");
